@@ -40,6 +40,8 @@ func init() {
 	cmd.Flags().Uint64VarP(&exerciser.ChainID, "chainid", "i", 0, "Chain ID - required for external signing")
 	cmd.Flags().StringArrayVarP(&exerciser.Accounts, "accounts", "a", []string{}, "Account addresses - 1/worker needed for internal geth client signing")
 	cmd.MarkFlagRequired("url")
+	cmd.MarkFlagRequired("file")
+	cmd.MarkFlagRequired("method")
 }
 
 var cmd = &cobra.Command{

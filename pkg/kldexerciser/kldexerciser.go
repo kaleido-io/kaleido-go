@@ -34,7 +34,7 @@ func (e Exerciser) Start() error {
 	if err != nil {
 		return err
 	}
-	log.Debug("Compiled contract", compiled)
+	log.Debug("Compiled contract ", compiled.Compiled)
 
 	return nil
 }
