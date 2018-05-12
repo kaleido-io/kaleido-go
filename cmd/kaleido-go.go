@@ -7,12 +7,10 @@ import (
 	"github.com/kaleido-io/kaleido-go/pkg/kldexerciser"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func initLogging(debugLevel int) {
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-	log.Info("Debug sets ", debugLevel)
 	switch debugLevel {
 	case 0:
 		log.SetLevel(log.ErrorLevel)
@@ -24,28 +22,33 @@ func initLogging(debugLevel int) {
 		log.SetLevel(log.DebugLevel)
 		break
 	}
+	log.Debug("Debug level ", debugLevel)
 }
 
-var exerciserConfig kldexerciser.KldExerciserConfig
+var exerciser kldexerciser.Exerciser
 
 func init() {
-	cmd.Flags().StringVarP(&exerciserConfig.URL, "url", "u", "", "JSON/RPC URL for the Ethereum node: https://user:pass@xyz-rpc.kaleido.io")
-	cmd.Flags().StringVarP(&exerciserConfig.Contract, "contract", "c", "", "Contract address (with or without 0x prefix)")
-	cmd.Flags().IntVarP(&exerciserConfig.Txns, "transactions", "t", 1, "Count of transactions to run per worker (0=infinite)")
-	cmd.Flags().IntVarP(&exerciserConfig.Workers, "workers", "w", 1, "Number of workers to run")
-	cmd.Flags().IntVarP(&exerciserConfig.DebugLevel, "debug", "d", 1, "0=error, 1=info, 2=debug")
+	cmd.Flags().IntVarP(&exerciser.DebugLevel, "debug", "d", 1, "0=error, 1=info, 2=debug")
+	cmd.Flags().StringVarP(&exerciser.URL, "url", "u", "", "JSON/RPC URL for the Ethereum node: https://user:pass@xyz-rpc.kaleido.io")
+	cmd.Flags().StringVarP(&exerciser.SolidityFile, "file", "f", "", "Solidity smart contract to compile (and deploy if no contract address supplied)")
+	cmd.Flags().StringVarP(&exerciser.Contract, "contract", "c", "", "Pre-deployed contract address (with or without 0x prefix)")
+	cmd.Flags().IntVarP(&exerciser.Txns, "transactions", "t", 1, "Count of transactions to run per worker (0=infinite)")
+	cmd.Flags().IntVarP(&exerciser.Workers, "workers", "w", 1, "Number of workers to run")
+	cmd.Flags().BoolVarP(&exerciser.ExternalSign, "extsign", "e", true, "Sign externally with generated accounts")
+	cmd.Flags().Uint64VarP(&exerciser.ChainID, "chainid", "i", 0, "Chain ID - required for external signing")
+	cmd.Flags().StringArrayVarP(&exerciser.Accounts, "accounts", "a", []string{}, "Account addresses - 1/worker needed for internal geth client signing")
 	cmd.MarkFlagRequired("url")
-	cmd.MarkFlagRequired("contract")
-	viper.SetDefault("debug", 1)
-	viper.SetDefault("count", 1)
-	viper.SetDefault("workers", 1)
 }
 
 var cmd = &cobra.Command{
 	Use:   "kaleido-go",
 	Short: "Sample exerciser for Ethereum permissioned chains - from Kaleido",
 	Run: func(cmd *cobra.Command, args []string) {
-		initLogging(viper.GetInt("debug"))
+		initLogging(exerciser.DebugLevel)
+		if err := exerciser.Start(); err != nil {
+			log.Error("Exerciser Start: ", err)
+			os.Exit(1)
+		}
 	},
 }
 
