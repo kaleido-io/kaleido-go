@@ -2,24 +2,28 @@ package kldexerciser
 
 import (
 	"fmt"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 )
 
 // Exerciser is the Kaleido go-ethereum exerciser
 type Exerciser struct {
-	URL          string
-	Contract     string
-	Method       string
-	Args         []string
-	SolidityFile string
-	ABI          string
-	Txns         int
-	Workers      int
-	DebugLevel   int
-	ExternalSign bool
-	ChainID      uint64
-	Accounts     []string
+	URL            string
+	Contract       string
+	Method         string
+	Args           []string
+	SolidityFile   string
+	ABI            string
+	Loops          int
+	TxnsPerLoop    int
+	ReceiptWaitMin int
+	ReceiptWaitMax int
+	Workers        int
+	DebugLevel     int
+	ExternalSign   bool
+	ChainID        uint64
+	Accounts       []string
 }
 
 // Start initializes the workers for the specified config
@@ -34,7 +38,23 @@ func (e Exerciser) Start() error {
 	if err != nil {
 		return err
 	}
-	log.Debug("Compiled contract ", compiled.Compiled)
+	log.Info("Exercising method '", e.Method, "' in solidity contract ", e.SolidityFile)
+
+	log.Debug("Starting workers. Count=", e.Workers)
+	var workers = make([]Worker, e.Workers)
+	var wg sync.WaitGroup
+	for idx, worker := range workers {
+		worker.Name = fmt.Sprintf("W%04d", idx)
+		worker.CompiledContract = compiled
+		worker.Exerciser = &e
+		wg.Add(1)
+		go func(worker *Worker) {
+			worker.Run()
+			wg.Done()
+		}(&worker)
+	}
+	wg.Wait()
+	log.Debug("All workers complete")
 
 	return nil
 }

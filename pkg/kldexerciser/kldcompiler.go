@@ -29,7 +29,7 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]inte
 		return nil, fmt.Errorf("Method '%s' not found", methodName)
 	}
 
-	log.Debug("Parsing args for method ", method)
+	log.Debug("Parsing args for method: ", method)
 	var typedArgs []interface{}
 	for idx, inputArg := range method.Inputs {
 		if idx >= len(strargs) {
