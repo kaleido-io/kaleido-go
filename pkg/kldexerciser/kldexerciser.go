@@ -10,6 +10,8 @@ import (
 type Exerciser struct {
 	URL          string
 	Contract     string
+	Method       string
+	Args         []string
 	SolidityFile string
 	ABI          string
 	Txns         int
@@ -28,10 +30,11 @@ func (e Exerciser) Start() error {
 	}
 
 	log.Debug("Compiling solidity file ", e.SolidityFile)
-	compiled := CompiledSolidity{SolidityFile: e.SolidityFile}
-	if err := compiled.Compile(); err != nil {
+	compiled, err := CompileContract(e.SolidityFile, e.Method, e.Args)
+	if err != nil {
 		return err
 	}
+	log.Debug("Compiled contract", compiled)
 
 	return nil
 }

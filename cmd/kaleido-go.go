@@ -32,6 +32,8 @@ func init() {
 	cmd.Flags().StringVarP(&exerciser.URL, "url", "u", "", "JSON/RPC URL for the Ethereum node: https://user:pass@xyz-rpc.kaleido.io")
 	cmd.Flags().StringVarP(&exerciser.SolidityFile, "file", "f", "", "Solidity smart contract to compile (and deploy if no contract address supplied)")
 	cmd.Flags().StringVarP(&exerciser.Contract, "contract", "c", "", "Pre-deployed contract address (with or without 0x prefix)")
+	cmd.Flags().StringVarP(&exerciser.Method, "method", "m", "", "Method in the contract to invoke")
+	cmd.Flags().StringArrayVarP(&exerciser.Args, "args", "x", []string{}, "String arguments to pass to contract method")
 	cmd.Flags().IntVarP(&exerciser.Txns, "transactions", "t", 1, "Count of transactions to run per worker (0=infinite)")
 	cmd.Flags().IntVarP(&exerciser.Workers, "workers", "w", 1, "Number of workers to run")
 	cmd.Flags().BoolVarP(&exerciser.ExternalSign, "extsign", "e", true, "Sign externally with generated accounts")
