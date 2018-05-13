@@ -22,14 +22,16 @@ type Exerciser struct {
 	Workers        int
 	DebugLevel     int
 	ExternalSign   bool
-	ChainID        uint64
+	ChainID        int64
 	Accounts       []string
 }
 
 // Start initializes the workers for the specified config
-func (e Exerciser) Start() error {
+func (e *Exerciser) Start() error {
 
-	if !e.ExternalSign && len(e.Accounts) < e.Workers {
+	if e.ExternalSign && e.ChainID <= 0 {
+		return fmt.Errorf("ChainID not supplied. Required for external signing")
+	} else if !e.ExternalSign && len(e.Accounts) < e.Workers {
 		return fmt.Errorf("Need accounts for each of %d workers (%d supplied)", e.Workers, len(e.Accounts))
 	}
 
@@ -45,8 +47,12 @@ func (e Exerciser) Start() error {
 	var wg sync.WaitGroup
 	for idx, worker := range workers {
 		worker.Name = fmt.Sprintf("W%04d", idx)
+		worker.Index = idx
 		worker.CompiledContract = compiled
-		worker.Exerciser = &e
+		worker.Exerciser = e
+		if err := worker.Init(); err != nil {
+			return err
+		}
 		wg.Add(1)
 		go func(worker *Worker) {
 			worker.Run()
