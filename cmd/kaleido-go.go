@@ -35,6 +35,8 @@ func init() {
 	cmd.Flags().StringVarP(&exerciser.Method, "method", "m", "", "Method in the contract to invoke")
 	cmd.Flags().StringArrayVarP(&exerciser.Args, "args", "x", []string{}, "String arguments to pass to contract method")
 	cmd.Flags().IntVarP(&exerciser.TxnsPerLoop, "transactions", "t", 1, "Count of transactions to run per worker")
+	cmd.Flags().Int64VarP(&exerciser.Gas, "gas", "g", 1000000, "Gas limit on the transaction")
+	cmd.Flags().Int64VarP(&exerciser.GasPrice, "gasprice", "G", 0, "Gas price")
 	cmd.Flags().IntVarP(&exerciser.Loops, "loops", "l", 1, "How many times each looper should loop till exiting (0=infinite)")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMin, "seconds-min", "s", 11, "Time in seconds to wait before checking for a txn receipt")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMax, "seconds-max", "S", 20, "Time in seconds before timing out waiting for a txn receipt")

@@ -15,6 +15,9 @@ type Exerciser struct {
 	Args           []string
 	SolidityFile   string
 	ABI            string
+	Amount         int64
+	GasPrice       int64
+	Gas            int64
 	Loops          int
 	TxnsPerLoop    int
 	ReceiptWaitMin int
