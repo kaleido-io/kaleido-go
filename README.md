@@ -12,14 +12,14 @@ interface and code samples for:
 - Externally signing transactions (using [EIP155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) signing)
 - Checking for transaction receipts
 
-### License
+## License
 
 This code is distributed under the [Apache 2 license](LICENSE).
 
-> Please note this code currently statically links to code distributed under the
+> Please note the code currently statically links to code distributed under the
 > LGPL license.
 
-### Running
+## Running
 
 ```
 Sample exerciser for Ethereum permissioned chains - from Kaleido
