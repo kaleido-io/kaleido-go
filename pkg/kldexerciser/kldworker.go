@@ -63,7 +63,7 @@ func (w *Worker) generateAccount() error {
 func (w *Worker) generateTransaction() *types.Transaction {
 	tx := types.NewTransaction(
 		w.Nonce,
-		w.Account,
+		*w.Exerciser.To,
 		big.NewInt(w.Exerciser.Amount),
 		uint64(w.Exerciser.Gas),
 		big.NewInt(w.Exerciser.GasPrice),
@@ -132,6 +132,9 @@ func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 		if err != nil && err != ethereum.NotFound {
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
+		if err == nil && receipt.Status == types.ReceiptStatusFailed {
+			return nil, fmt.Errorf("Transaction execution failed")
+		}
 		if elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
 			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs: %s", elapsed.Seconds(), err)
 		}
@@ -157,7 +160,7 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*types.Receipt, er
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 		receipt, err = w.waitUntilMined(txHash)
 		if err != nil {
-			w.error("failed checking TX receipt: %s", err)
+			return nil, fmt.Errorf("failed checking TX receipt: %s", err)
 		}
 	}
 	return receipt, err
