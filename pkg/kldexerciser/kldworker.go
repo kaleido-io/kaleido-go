@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	log "github.com/sirupsen/logrus"
 )
@@ -57,47 +58,57 @@ func (w *Worker) generateAccount() error {
 	return nil
 }
 
-// signTxn externally signs a transaction
-func (w *Worker) sendSignedTransaction(ctx context.Context, tx *types.Transaction) error {
-	signedTx, _ := types.SignTx(tx, w.Signer, w.PrivateKey)
-	var buff bytes.Buffer
-	signedTx.EncodeRLP(&buff)
-	from, _ := types.Sender(w.Signer, signedTx)
-	w.debug("TX:%s externally signed. ChainID=%d From=%s", tx.Hash().Hex(), w.Exerciser.ChainID, from.Hex())
-
-	return w.EthClient.SendTransaction(ctx, signedTx)
-}
-
-// sendTransaction sends a single transaction and returns the txid
-func (w *Worker) sendTransaction() (common.Hash, error) {
-
-	start := time.Now()
-	tx := types.NewTransaction(w.Nonce,
+// generateTransaction creates a new transaction for the specified data
+func (w *Worker) generateTransaction() *types.Transaction {
+	tx := types.NewTransaction(
+		w.Nonce,
 		w.Account,
 		big.NewInt(w.Exerciser.Amount),
 		uint64(w.Exerciser.Gas),
 		big.NewInt(w.Exerciser.GasPrice),
 		w.CompiledContract.PackedCall)
-	txHash := tx.Hash()
 	w.debug("TX:%s Nonce=%d To=%s Amount=%d Gas=%d GasPrice=%d",
-		txHash.Hex(), w.Nonce, tx.To().Hex(), w.Exerciser.Amount, w.Exerciser.Gas, w.Exerciser.GasPrice)
+		tx.Hash().Hex(), w.Nonce, tx.To().Hex(), w.Exerciser.Amount, w.Exerciser.Gas, w.Exerciser.GasPrice)
+	return tx
+}
+
+// sendTransaction sends an individual transaction, choosing external or internal signing
+func (w *Worker) sendTransaction(tx *types.Transaction) (string, error) {
+	start := time.Now()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	var err error
+	var txHash string
 	if w.Exerciser.ExternalSign {
-		err = w.sendSignedTransaction(ctx, tx)
+		txHash, err = w.signAndSendTxn(ctx, tx)
 	}
 	callTime := time.Now().Sub(start)
 	ok := (err == nil)
-	w.info("Sent TX:%s transaction. OK=%t [%.2fs]", txHash.Hex(), ok, callTime.Seconds())
-
+	w.info("TX:%s Sent. OK=%t [%.2fs]", txHash, ok, callTime.Seconds())
 	return txHash, err
 }
 
-// waitUntilMined waits until a given transaction has been mined
-func (w *Worker) waitUntilMined(txHash common.Hash) error {
+// signAndSendTxn externally signs and sends a transaction
+func (w *Worker) signAndSendTxn(ctx context.Context, tx *types.Transaction) (string, error) {
+	signedTx, _ := types.SignTx(tx, w.Signer, w.PrivateKey)
+	var buff bytes.Buffer
+	signedTx.EncodeRLP(&buff)
+	from, _ := types.Sender(w.Signer, signedTx)
+	w.debug("TX signed. ChainID=%d From=%s", w.Exerciser.ChainID, from.Hex())
+
+	var txHash string
+	data, err := rlp.EncodeToBytes(signedTx)
+	if err != nil {
+		return txHash, fmt.Errorf("Failed to RLP encode: %s", err)
+	}
+	err = w.RPC.CallContext(ctx, &txHash, "eth_sendRawTransaction", common.ToHex(data))
+	return txHash, err
+}
+
+// WaitUntilMined waits until a given transaction has been mined
+func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 
 	var isMined = false
 	start := time.Now()
@@ -112,30 +123,48 @@ func (w *Worker) waitUntilMined(txHash common.Hash) error {
 	// checking periodically - 5 times up to the maximum
 	retryDelay := time.Duration(float64(w.Exerciser.ReceiptWaitMax-w.Exerciser.ReceiptWaitMin)/5) * time.Second
 
+	var receipt types.Receipt
 	for !isMined {
 		callStart := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		receipt, err := w.EthClient.TransactionReceipt(ctx, txHash)
+		receipt, err := w.EthClient.TransactionReceipt(ctx, common.HexToHash(txHash))
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
 		isMined = receipt != nil
-		w.info("Requested TX:%s receipt. Mined=%t after %.2fs [%.2fs]", txHash.Hex(), isMined, elapsed.Seconds(), callTime.Seconds())
+		w.info("Requested TX:%s receipt. Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
-			return fmt.Errorf("Requesting TX receipt: %s", err)
+			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
 		if elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
-			return fmt.Errorf("Timed out waiting for TX receipt after %.2fs: %s", elapsed.Seconds(), err)
+			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs: %s", elapsed.Seconds(), err)
 		}
 		if !isMined {
 			time.Sleep(retryDelay)
 		} else {
-			w.debug("TX:%s receipt: %s", receipt)
+			w.debug("TX:%s receipt. GasUsed=%d CumulativeGasUsed=%d", txHash, receipt.GasUsed, receipt.CumulativeGasUsed)
 		}
 	}
 
-	return nil
+	return &receipt, nil
+}
+
+// SendAndWaitForMining sends a single transaction and waits for it to be mined
+func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*types.Receipt, error) {
+	txHash, err := w.sendTransaction(tx)
+	var receipt *types.Receipt
+	if err != nil {
+		w.error("failed sending TX: %s", err)
+	} else {
+		receipt, err = w.waitUntilMined(txHash)
+		if err != nil {
+			w.error("failed checking TX receipt: %s", err)
+		} else {
+			w.Nonce++
+		}
+	}
+	return receipt, err
 }
 
 // Init the account and connection for this worker
@@ -161,27 +190,34 @@ func (w *Worker) Init() error {
 	}
 	w.RPC = rpc
 	w.EthClient = ethclient.NewClient(w.RPC)
-	log.Debug(w.Name, ": connected. URL=%s", w.Exerciser.URL)
+	log.Debug(w.Name, ": connected. URL=", w.Exerciser.URL)
 	return nil
+}
+
+// InstallContract installs the contract and returns the address
+func (w *Worker) InstallContract() (*common.Address, error) {
+	tx := types.NewContractCreation(
+		w.Nonce,
+		big.NewInt(w.Exerciser.Amount),
+		uint64(w.Exerciser.Gas),
+		big.NewInt(w.Exerciser.GasPrice),
+		common.FromHex(w.CompiledContract.Compiled),
+	)
+	receipt, err := w.sendAndWaitForMining(tx)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to install contract: %s", err)
+	}
+	return &receipt.ContractAddress, nil
 }
 
 // Run executes the specified exerciser workload then exits
 func (w *Worker) Run() {
-	log.Debug(w.Name, ": started. Account=%s", w.Account.Hex())
+	log.Debug(w.Name, ": started. Account=", w.Account.Hex())
 
 	infinite := (w.Exerciser.Loops == 0)
 	for ; w.LoopIndex < uint64(w.Exerciser.Loops) || infinite; w.LoopIndex++ {
-		txHash, err := w.sendTransaction()
-		if err != nil {
-			w.error("failed sending TX: %s", err)
-		} else {
-			err = w.waitUntilMined(txHash)
-			if err != nil {
-				w.error("failed checking TX receipt: %s", err)
-			} else {
-				w.Nonce++
-			}
-		}
+		tx := w.generateTransaction()
+		w.sendAndWaitForMining(tx)
 	}
 
 	w.RPC.Close()

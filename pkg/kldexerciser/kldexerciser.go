@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -11,6 +13,7 @@ import (
 type Exerciser struct {
 	URL            string
 	Contract       string
+	To             *common.Address
 	Method         string
 	Args           []string
 	SolidityFile   string
@@ -45,22 +48,43 @@ func (e *Exerciser) Start() error {
 	}
 	log.Info("Exercising method '", e.Method, "' in solidity contract ", e.SolidityFile)
 
-	log.Debug("Starting workers. Count=", e.Workers)
+	log.Debug("Connecting workers. Count=", e.Workers)
 	var workers = make([]Worker, e.Workers)
-	var wg sync.WaitGroup
-	for idx, worker := range workers {
-		worker.Name = fmt.Sprintf("W%04d", idx)
-		worker.Index = idx
+	for i := 0; i < len(workers); i++ {
+		worker := &workers[i]
+		worker.Name = fmt.Sprintf("W%04d", i)
+		worker.Index = i
 		worker.CompiledContract = compiled
 		worker.Exerciser = e
 		if err := worker.Init(); err != nil {
 			return err
 		}
+	}
+
+	if e.Contract == "" {
+		worker := &workers[0]
+		log.Debug("Deploying contract using worker ", worker.Name)
+		e.To, err = worker.InstallContract()
+		if err != nil {
+			return err
+		}
+	} else {
+		if !common.IsHexAddress(e.Contract) {
+			return fmt.Errorf("Invalid contract address: %s", e.Contract)
+		}
+		contractAddr := common.HexToAddress(e.Contract)
+		e.To = &contractAddr
+	}
+
+	log.Debug("Starting workers. Count=", e.Workers)
+	var wg sync.WaitGroup
+	for i := 0; i < len(workers); i++ {
+		worker := &workers[i]
 		wg.Add(1)
 		go func(worker *Worker) {
 			worker.Run()
 			wg.Done()
-		}(&worker)
+		}(worker)
 	}
 	wg.Wait()
 	log.Debug("All workers complete")
