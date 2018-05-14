@@ -14,7 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	ecrypto "github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	log "github.com/sirupsen/logrus"
@@ -29,7 +28,6 @@ type Worker struct {
 	Nonce            uint64
 	CompiledContract *CompiledSolidity
 	RPC              *rpc.Client
-	EthClient        *ethclient.Client
 	Account          common.Address
 	PrivateKey       *ecdsa.PrivateKey
 	Signer           types.EIP155Signer
@@ -108,8 +106,21 @@ func (w *Worker) signAndSendTxn(ctx context.Context, tx *types.Transaction) (str
 	return txHash, err
 }
 
+type TxnReceipt struct {
+	BlockHash string `json:blockHash`
+	BlockNumber string `json:blockNumber`
+	ContractAddress string `json:contractAddress`
+	CumulativeGasUsed string `json:cumulativeGasUsed`
+	TransactionHash string `json:transactionHash`
+	From string `json:from`
+	GasUsed string `json:gasUsed`
+	Status string `json:status`
+	To string `json:to`
+	TransactionIndex string `json:transactionIndex`
+}
+
 // WaitUntilMined waits until a given transaction has been mined
-func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
+func (w *Worker) waitUntilMined(txHash string) (*TxnReceipt, error) {
 
 	var isMined = false
 	start := time.Now()
@@ -118,30 +129,28 @@ func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 	// checking periodically - 5 times up to the maximum
 	retryDelay := time.Duration(float64(w.Exerciser.ReceiptWaitMax-w.Exerciser.ReceiptWaitMin)/5) * time.Second
 
-	var receipt types.Receipt
+	var receipt TxnReceipt
 	for !isMined {
 		callStart := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		receipt, err := w.EthClient.TransactionReceipt(ctx, common.HexToHash(txHash))
+		err := w.RPC.CallContext(ctx, &receipt, "eth_getTransactionReceipt", common.HexToHash(txHash))
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
-		isMined = receipt != nil
-		w.debug("Requested TX:%s receipt. Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
+		
+		isMined = receipt.Status == "0x1"
+		w.info("TX:%s Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
-		if err == nil && receipt.Status == types.ReceiptStatusFailed {
-			return nil, fmt.Errorf("Transaction execution failed")
-		}
-		if elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
+		w.debug("Status=%s BlockNumber=%s BlockHash=%s TransactionIndex=%s GasUsed=%s CumulativeGasUsed=%s",
+			receipt.Status, receipt.BlockNumber, receipt.BlockHash, receipt.TransactionIndex, receipt.GasUsed, receipt.CumulativeGasUsed)
+		if !isMined && elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
 			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs: %s", elapsed.Seconds(), err)
 		}
 		if !isMined {
 			time.Sleep(retryDelay)
-		} else {
-			w.info("TX:%s receipt. GasUsed=%d CumulativeGasUsed=%d", txHash, receipt.GasUsed, receipt.CumulativeGasUsed)
 		}
 	}
 
@@ -149,9 +158,9 @@ func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 }
 
 // SendAndWaitForMining sends a single transaction and waits for it to be mined
-func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*types.Receipt, error) {
+func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*TxnReceipt, error) {
 	txHash, err := w.sendTransaction(tx)
-	var receipt *types.Receipt
+	var receipt *TxnReceipt
 	if err != nil {
 		w.error("failed sending TX: %s", err)
 	} else {
@@ -188,7 +197,6 @@ func (w *Worker) Init() error {
 		return fmt.Errorf("Connect to %s failed: %s", w.Exerciser.URL, err)
 	}
 	w.RPC = rpc
-	w.EthClient = ethclient.NewClient(w.RPC)
 	log.Debug(w.Name, ": connected. URL=", w.Exerciser.URL)
 	return nil
 }
@@ -206,12 +214,13 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to install contract: %s", err)
 	}
-	return &receipt.ContractAddress, nil
+	contractAddr := common.HexToAddress(receipt.ContractAddress)
+	return &contractAddr, nil
 }
 
 // Run executes the specified exerciser workload then exits
 func (w *Worker) Run() {
-	log.Debug(w.Name, ": started. %d/loop for %d loops. Account=", w.Exerciser.TxnsPerLoop, w.Exerciser.Loops, w.Account.Hex())
+	log.Debug(w.Name, ": started. ", w.Exerciser.TxnsPerLoop, " tx/loop for ", w.Exerciser.Loops, " loops. Account=", w.Account.Hex())
 
 	var successes, failures uint64
 	infinite := (w.Exerciser.Loops == 0)
