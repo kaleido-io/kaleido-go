@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
+
 	"github.com/ethereum/go-ethereum"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -34,15 +36,15 @@ type Worker struct {
 }
 
 func (w Worker) debug(message string, inserts ...interface{}) {
-	log.Debug(fmt.Sprintf("%s/%06d: ", w.Name, w.LoopIndex), fmt.Sprintf(message, inserts...))
+	log.Debug(fmt.Sprintf("%s/L%04d/N%06d: ", w.Name, w.LoopIndex, w.Nonce), fmt.Sprintf(message, inserts...))
 }
 
 func (w Worker) info(message string, inserts ...interface{}) {
-	log.Info(fmt.Sprintf("%s/%06d: ", w.Name, w.LoopIndex), fmt.Sprintf(message, inserts...))
+	log.Info(fmt.Sprintf("%s/L%04d/N%06d: ", w.Name, w.LoopIndex, w.Nonce), fmt.Sprintf(message, inserts...))
 }
 
 func (w Worker) error(message string, inserts ...interface{}) {
-	log.Error(fmt.Sprintf("%s/%06d: ", w.Name, w.LoopIndex), fmt.Sprintf(message, inserts...))
+	log.Error(fmt.Sprintf("%s/L%04d/N%06d: ", w.Name, w.LoopIndex, w.Nonce), fmt.Sprintf(message, inserts...))
 }
 
 // generateAccount generates a new account for this worker to use in external signing
@@ -66,8 +68,8 @@ func (w *Worker) generateTransaction() *types.Transaction {
 		uint64(w.Exerciser.Gas),
 		big.NewInt(w.Exerciser.GasPrice),
 		w.CompiledContract.PackedCall)
-	w.debug("TX:%s Nonce=%d To=%s Amount=%d Gas=%d GasPrice=%d",
-		tx.Hash().Hex(), w.Nonce, tx.To().Hex(), w.Exerciser.Amount, w.Exerciser.Gas, w.Exerciser.GasPrice)
+	w.debug("TX:%s To=%s Amount=%d Gas=%d GasPrice=%d",
+		tx.Hash().Hex(), tx.To().Hex(), w.Exerciser.Amount, w.Exerciser.Gas, w.Exerciser.GasPrice)
 	return tx
 }
 
@@ -82,10 +84,44 @@ func (w *Worker) sendTransaction(tx *types.Transaction) (string, error) {
 	var txHash string
 	if w.Exerciser.ExternalSign {
 		txHash, err = w.signAndSendTxn(ctx, tx)
+	} else {
+		txHash, err = w.sendUnsignedTxn(ctx, tx)
 	}
 	callTime := time.Now().Sub(start)
 	ok := (err == nil)
 	w.info("TX:%s Sent. OK=%t [%.2fs]", txHash, ok, callTime.Seconds())
+	return txHash, err
+}
+
+type sendTxArgs struct {
+	Nonce    hexutil.Uint64 `json:"nonce"`
+	From     string         `json:"from"`
+	To       string         `json:"to"`
+	Gas      hexutil.Uint64 `json:"gas"`
+	GasPrice hexutil.Big    `json:"gasPrice"`
+	Value    hexutil.Big    `json:"value"`
+	Data     *hexutil.Bytes `json:"data"`
+}
+
+// sendUnsignedTxn sends a transaction for internal signing by the node
+func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (string, error) {
+	data := hexutil.Bytes(tx.Data())
+	var to = tx.To()
+	if to == nil {
+		var emptyTo common.Address
+		to = &emptyTo
+	}
+	args := sendTxArgs{
+		Nonce:    hexutil.Uint64(w.Nonce),
+		From:     w.Account.Hex(),
+		To:       to.Hex(),
+		Gas:      hexutil.Uint64(tx.Gas()),
+		GasPrice: hexutil.Big(*tx.GasPrice()),
+		Value:    hexutil.Big(*tx.Value()),
+		Data:     &data,
+	}
+	var txHash string
+	err := w.RPC.CallContext(ctx, &txHash, "eth_sendTransaction", args)
 	return txHash, err
 }
 
@@ -106,30 +142,29 @@ func (w *Worker) signAndSendTxn(ctx context.Context, tx *types.Transaction) (str
 	return txHash, err
 }
 
-type TxnReceipt struct {
-	BlockHash string `json:blockHash`
-	BlockNumber string `json:blockNumber`
-	ContractAddress string `json:contractAddress`
-	CumulativeGasUsed string `json:cumulativeGasUsed`
-	TransactionHash string `json:transactionHash`
-	From string `json:from`
-	GasUsed string `json:gasUsed`
-	Status string `json:status`
-	To string `json:to`
-	TransactionIndex string `json:transactionIndex`
+type txnReceipt struct {
+	BlockHash         string `json:"blockHash"`
+	BlockNumber       string `json:"blockNumber"`
+	ContractAddress   string `json:"contractAddress"`
+	CumulativeGasUsed string `json:"cumulativeGasUsed"`
+	TransactionHash   string `json:"transactionHash"`
+	From              string `json:"from"`
+	GasUsed           string `json:"gasUsed"`
+	Status            string `json:"status"`
+	To                string `json:"to"`
+	TransactionIndex  string `json:"transactionIndex"`
 }
 
 // WaitUntilMined waits until a given transaction has been mined
-func (w *Worker) waitUntilMined(txHash string) (*TxnReceipt, error) {
+func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, error) {
 
 	var isMined = false
-	start := time.Now()
 
 	// After this initial sleep we wait up to a maximum time,
 	// checking periodically - 5 times up to the maximum
 	retryDelay := time.Duration(float64(w.Exerciser.ReceiptWaitMax-w.Exerciser.ReceiptWaitMin)/5) * time.Second
 
-	var receipt TxnReceipt
+	var receipt txnReceipt
 	for !isMined {
 		callStart := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -138,7 +173,7 @@ func (w *Worker) waitUntilMined(txHash string) (*TxnReceipt, error) {
 		err := w.RPC.CallContext(ctx, &receipt, "eth_getTransactionReceipt", common.HexToHash(txHash))
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
-		
+
 		isMined = receipt.Status == "0x1"
 		w.info("TX:%s Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
@@ -158,16 +193,17 @@ func (w *Worker) waitUntilMined(txHash string) (*TxnReceipt, error) {
 }
 
 // SendAndWaitForMining sends a single transaction and waits for it to be mined
-func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*TxnReceipt, error) {
+func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*txnReceipt, error) {
 	txHash, err := w.sendTransaction(tx)
-	var receipt *TxnReceipt
+	var receipt *txnReceipt
 	if err != nil {
 		w.error("failed sending TX: %s", err)
 	} else {
 		w.Nonce++
 		// Wait for mining
+		start := time.Now()
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
-		receipt, err = w.waitUntilMined(txHash)
+		receipt, err = w.waitUntilMined(start, txHash)
 		if err != nil {
 			return nil, fmt.Errorf("failed checking TX receipt: %s", err)
 		}
@@ -175,8 +211,30 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*TxnReceipt, error
 	return receipt, err
 }
 
+// initializeNonce get the initial nonce to use
+func (w *Worker) initializeNonce(address string) error {
+	var result hexutil.Uint64
+	err := w.RPC.Call(&result, "eth_getTransactionCount", address, "latest")
+	if err != nil {
+		return fmt.Errorf("Failed to get transaction count for %s: %s", address, err)
+	}
+	w.Nonce = uint64(result)
+	if err != nil {
+		return fmt.Errorf("Failed to parse transaction count '%s' for %s: %s", result, address, err)
+	}
+	return nil
+}
+
 // Init the account and connection for this worker
 func (w *Worker) Init() error {
+
+	// Connect the client
+	rpc, err := rpc.Dial(w.Exerciser.URL)
+	if err != nil {
+		return fmt.Errorf("Connect to %s failed: %s", w.Exerciser.URL, err)
+	}
+	w.RPC = rpc
+	log.Debug(w.Name, ": connected. URL=", w.Exerciser.URL)
 
 	// Generate or allocate an account from the exerciser
 	if w.Exerciser.ExternalSign {
@@ -189,15 +247,13 @@ func (w *Worker) Init() error {
 			return fmt.Errorf("Invalid account address (20 hex bytes with '0x' prefix): %s", account)
 		}
 		w.Account = common.HexToAddress(account)
+
+		// Get the initial nonce for this existing account
+		if err := w.initializeNonce(account); err != nil {
+			return err
+		}
 	}
 
-	// Connect the client
-	rpc, err := rpc.Dial(w.Exerciser.URL)
-	if err != nil {
-		return fmt.Errorf("Connect to %s failed: %s", w.Exerciser.URL, err)
-	}
-	w.RPC = rpc
-	log.Debug(w.Name, ": connected. URL=", w.Exerciser.URL)
 	return nil
 }
 
@@ -243,12 +299,13 @@ func (w *Worker) Run() {
 		// Wait for number of configurable number of seconds before attempting
 		// to check for the transaction receipt.
 		// ** This should be greater than the block period **
+		start := time.Now()
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 
 		// Wait the receipts of all successfully set transctions
 		var loopSuccesses uint64
 		for _, txHash := range txHashes {
-			_, err := w.waitUntilMined(txHash)
+			_, err := w.waitUntilMined(start, txHash)
 			if err != nil {
 				w.error("TX:%s failed checking receipt: %s", err)
 			} else {

@@ -41,7 +41,7 @@ func init() {
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMin, "seconds-min", "s", 11, "Time in seconds to wait before checking for a txn receipt")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMax, "seconds-max", "S", 20, "Time in seconds before timing out waiting for a txn receipt")
 	cmd.Flags().IntVarP(&exerciser.Workers, "workers", "w", 1, "Number of workers to run")
-	cmd.Flags().BoolVarP(&exerciser.ExternalSign, "extsign", "e", true, "Sign externally with generated accounts")
+	cmd.Flags().BoolVarP(&exerciser.ExternalSign, "extsign", "e", false, "Sign externally with generated accounts")
 	cmd.Flags().Int64VarP(&exerciser.ChainID, "chainid", "i", 0, "Chain ID - required for external signing")
 	cmd.Flags().StringArrayVarP(&exerciser.Accounts, "accounts", "a", []string{}, "Account addresses - 1 per worker needed for internal geth client signing")
 	cmd.MarkFlagRequired("url")
