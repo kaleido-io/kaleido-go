@@ -5,12 +5,13 @@ GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get
 BINARY_NAME=kaleido-go
-BINARY_UNIX=$(BINARY_NAME)_unix
-BINARY_MAC=$(BINARY_NAME)_mac
+BINARY_UNIX=$(BINARY_NAME)-tux
+BINARY_MAC=$(BINARY_NAME)-mac
+BINARY_WIN=$(BINARY_NAME)-win
 
 all: deps build
 build: 
-		$(GOBUILD) -o $(BINARY_NAME) -v cmd/kaleido-go.go
+		$(GOBUILD) -o $(BINARY_NAME) -v
 clean: 
 		$(GOCLEAN)
 		rm -f $(BINARY_NAME)
@@ -19,16 +20,13 @@ run:
 		$(GOBUILD) -o $(BINARY_NAME) -v ./...
 		./$(BINARY_NAME)
 deps:
-		$(GOGET) github.com/ethereum/go-ethereum/accounts/abi
-		$(GOGET) github.com/ethereum/go-ethereum/common
-		$(GOGET) github.com/ethereum/go-ethereum/core/types
-		$(GOGET) github.com/ethereum/go-ethereum/crypto
+		$(GOGET) github.com/ethereum/go-ethereum
 		$(GOGET) github.com/sirupsen/logrus
 		$(GOGET) github.com/spf13/cobra
-		$(GOGET) github.com/spf13/viper
-		$(GOGET) github.com/mitchellh/go-homedir
 
 build-linux:
-		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v
+		GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v
 build-mac:
-		CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BINARY_MAC) -v
+		GOOS=darwin GOARCH=amd64 $(GOBUILD) -o $(BINARY_MAC) -v
+build-win:
+		GOOS=windows GOARCH=amd64 $(GOBUILD) -o $(BINARY_WIN) -v
