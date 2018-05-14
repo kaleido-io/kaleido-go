@@ -30,6 +30,8 @@ type Exerciser struct {
 	ExternalSign   bool
 	ChainID        int64
 	Accounts       []string
+	TotalSuccesses uint64
+	TotalFailures  uint64
 }
 
 // Start initializes the workers for the specified config
@@ -63,7 +65,7 @@ func (e *Exerciser) Start() error {
 
 	if e.Contract == "" {
 		worker := &workers[0]
-		log.Debug("Deploying contract using worker ", worker.Name)
+		log.Info("Deploying contract using worker ", worker.Name)
 		e.To, err = worker.InstallContract()
 		if err != nil {
 			return err
@@ -75,6 +77,7 @@ func (e *Exerciser) Start() error {
 		contractAddr := common.HexToAddress(e.Contract)
 		e.To = &contractAddr
 	}
+	log.Info("Contract address=", e.To.Hex())
 
 	log.Debug("Starting workers. Count=", e.Workers)
 	var wg sync.WaitGroup
@@ -87,7 +90,7 @@ func (e *Exerciser) Start() error {
 		}(worker)
 	}
 	wg.Wait()
-	log.Debug("All workers complete")
+	log.Debug("All workers complete. Success=", e.TotalSuccesses, " Failure=", e.TotalFailures)
 
 	return nil
 }

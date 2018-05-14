@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -113,12 +114,6 @@ func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 	var isMined = false
 	start := time.Now()
 
-	// Transactions will not be mined immediately.
-	// Wait for number of configurable number of seconds before attempting
-	// to check for the transaction receipt.
-	// ** This should be greater than the block period **
-	time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
-
 	// After this initial sleep we wait up to a maximum time,
 	// checking periodically - 5 times up to the maximum
 	retryDelay := time.Duration(float64(w.Exerciser.ReceiptWaitMax-w.Exerciser.ReceiptWaitMin)/5) * time.Second
@@ -133,7 +128,7 @@ func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
 		isMined = receipt != nil
-		w.info("Requested TX:%s receipt. Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
+		w.debug("Requested TX:%s receipt. Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
@@ -143,7 +138,7 @@ func (w *Worker) waitUntilMined(txHash string) (*types.Receipt, error) {
 		if !isMined {
 			time.Sleep(retryDelay)
 		} else {
-			w.debug("TX:%s receipt. GasUsed=%d CumulativeGasUsed=%d", txHash, receipt.GasUsed, receipt.CumulativeGasUsed)
+			w.info("TX:%s receipt. GasUsed=%d CumulativeGasUsed=%d", txHash, receipt.GasUsed, receipt.CumulativeGasUsed)
 		}
 	}
 
@@ -157,11 +152,12 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*types.Receipt, er
 	if err != nil {
 		w.error("failed sending TX: %s", err)
 	} else {
+		w.Nonce++
+		// Wait for mining
+		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 		receipt, err = w.waitUntilMined(txHash)
 		if err != nil {
 			w.error("failed checking TX receipt: %s", err)
-		} else {
-			w.Nonce++
 		}
 	}
 	return receipt, err
@@ -212,14 +208,50 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 
 // Run executes the specified exerciser workload then exits
 func (w *Worker) Run() {
-	log.Debug(w.Name, ": started. Account=", w.Account.Hex())
+	log.Debug(w.Name, ": started. %d/loop for %d loops. Account=", w.Exerciser.TxnsPerLoop, w.Exerciser.Loops, w.Account.Hex())
 
+	var successes, failures uint64
 	infinite := (w.Exerciser.Loops == 0)
 	for ; w.LoopIndex < uint64(w.Exerciser.Loops) || infinite; w.LoopIndex++ {
-		tx := w.generateTransaction()
-		w.sendAndWaitForMining(tx)
+
+		// Send a set of transactions before waiting for receipts (which takes some time)
+		var txHashes []string
+		for i := 0; i < w.Exerciser.TxnsPerLoop; i++ {
+			tx := w.generateTransaction()
+			txHash, err := w.sendTransaction(tx)
+			if err != nil {
+				w.error("TX send failed (%d/%d): %s", i, w.Exerciser.TxnsPerLoop, err)
+			} else {
+				w.Nonce++
+				txHashes = append(txHashes, txHash)
+			}
+		}
+
+		// Transactions will not be mined immediately.
+		// Wait for number of configurable number of seconds before attempting
+		// to check for the transaction receipt.
+		// ** This should be greater than the block period **
+		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
+
+		// Wait the receipts of all successfully set transctions
+		var loopSuccesses uint64
+		for _, txHash := range txHashes {
+			_, err := w.waitUntilMined(txHash)
+			if err != nil {
+				w.error("TX:%s failed checking receipt: %s", err)
+			} else {
+				loopSuccesses++
+			}
+		}
+		var loopFailures = uint64(w.Exerciser.TxnsPerLoop) - loopSuccesses
+
+		// Increment global counters
+		successes += loopSuccesses
+		atomic.AddUint64(&w.Exerciser.TotalSuccesses, loopSuccesses)
+		failures += loopFailures
+		atomic.AddUint64(&w.Exerciser.TotalFailures, loopFailures)
 	}
 
 	w.RPC.Close()
-	log.Debug(w.Name, ": finished. Loops=", w.LoopIndex)
+	log.Debug(w.Name, ": finished. Loops=", w.LoopIndex, " Success=", successes, " Failures=", failures)
 }
