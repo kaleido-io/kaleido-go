@@ -28,22 +28,85 @@ Usage:
   kaleido-go [flags]
 
 Flags:
-  -a, --accounts stringArray   Account addresses - 1 per worker needed for internal geth client signing
-  -x, --args stringArray       String arguments to pass to contract method
+  -a, --accounts stringArray   Account addresses - 1 per worker needed for geth signing
+  -x, --args stringArray       String arguments to pass to contract method (auto-converted to type)
+  -C, --call                   Call the contract and return a value, rather than sending a txn
   -i, --chainid int            Chain ID - required for external signing
   -c, --contract string        Pre-deployed contract address. Will be deployed if not specified
   -d, --debug int              0=error, 1=info, 2=debug (default 1)
-  -e, --extsign                Sign externally with generated accounts
-  -f, --file string            Solidity smart contract to compile (and deploy if no contract address supplied)
+  -e, --extsign                Sign externally with generated private keys + accounts
+  -f, --file string            Solidity smart contract source. Deployed if --contract not supplied
   -g, --gas int                Gas limit on the transaction (default 1000000)
   -G, --gasprice int           Gas price
   -h, --help                   help for kaleido-go
-  -l, --loops int              How many times each looper should loop till exiting (0=infinite) (default 1)
-  -m, --method string          Method in the contract to invoke
+  -l, --loops int              Loops to perform in each worker before exiting (0=infinite) (default 1)
+  -m, --method string          Method name in the contract to invoke
   -S, --seconds-max int        Time in seconds before timing out waiting for a txn receipt (default 20)
   -s, --seconds-min int        Time in seconds to wait before checking for a txn receipt (default 11)
   -t, --transactions int       Count of transactions submit on each worker loop (default 1)
-  -u, --url string             JSON/RPC URL for the Ethereum node: https://user:pass@xyz-rpc.kaleido.io
+  -u, --url string             JSON/RPC URL for Ethereum node: https://user:pass@xyz-rpc.kaleido.io
   -w, --workers int            Number of workers to run (default 1)
 ```
 
+## Build
+
+```sh
+make
+```
+
+## Examples
+
+Example commands below expect you to have set the following parameters:
+
+```sh
+# The Chain ID shown on the environment
+CHAIN_ID=12345678
+# The full Node URL including any application credentials
+NODE_URL="https://user:pass@nodeurl-rpc.kaleido.io"
+# Account existing on the node
+ACCOUNT=0x0102030405060708090a0b0c0e0e0f1011121314
+```
+
+# Deploy a contract and call a simple transaction
+
+Shell Command (linux/mac):
+
+```sh
+./kaleido-go -f examples/simplestorage.sol \
+  -m set -x 12345 \
+  -i "$CHAIN_ID" -u "$NODE_URL" -a "$ACCOUNT"
+```
+
+> You can enable DEBUG output with `-d 2`
+
+Example output:
+
+```
+INFO[2018-05-14T22:58:41-04:00] Exercising method 'set' in solidity contract examples/simplestorage.sol
+INFO[2018-05-14T22:58:42-04:00] Deploying contract using worker W0000
+INFO[2018-05-14T22:58:42-04:00] W0000/L0000/N000127: TX:0x739746d5b0c8bfb85e9975bd6ba5b5de52debd4e5119b556e22370ebc6947bdf Sent. OK=true [0.06s]
+INFO[2018-05-14T22:58:54-04:00] W0000/L0000/N000128: TX:0x739746d5b0c8bfb85e9975bd6ba5b5de52debd4e5119b556e22370ebc6947bdf Mined=true after 11.18s [0.18s]
+INFO[2018-05-14T22:58:54-04:00] Contract address=0x2C13d6D15975EfbF7DfD2bFdaFe7413e391eFc65
+INFO[2018-05-14T22:58:54-04:00] W0000/L0000/N000128: TX:0x51a62f3922f59405e86f85d79ad79bfcfdf24305ac4b103c6fe0ca6cd97105c3 Sent. OK=true [0.04s]
+INFO[2018-05-14T22:59:05-04:00] W0000/L0000/N000129: TX:0x51a62f3922f59405e86f85d79ad79bfcfdf24305ac4b103c6fe0ca6cd97105c3 Mined=true after 11.17s [0.17s]
+```
+
+# Call the contract deployed to get the value
+
+
+Shell Command (linux/mac):
+
+```sh
+./kaleido-go -f examples/simplestorage.sol \
+  -m get -C -c 0x2C13d6D15975EfbF7DfD2bFdaFe7413e391eFc65 \
+  -i "$CHAIN_ID" -u "$NODE_URL" -a "$ACCOUNT"
+```
+
+> TODO: Perform data-type sensitive parsing of return values
+
+Example output:
+```
+INFO[2018-05-14T23:01:26-04:00] Exercising method 'get' in solidity contract examples/simplestorage.sol
+INFO[2018-05-14T23:01:26-04:00] Contract address=0x2C13d6D15975EfbF7DfD2bFdaFe7413e391eFc65
+INFO[2018-05-14T23:01:26-04:00] W0000/L0000/N000129: Call result: '0x0000000000000000000000000000000000000000000000000000000000003039' [0.04s]
+```

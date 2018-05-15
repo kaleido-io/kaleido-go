@@ -137,6 +137,34 @@ func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (st
 	return txHash, err
 }
 
+// callContract call a transaction and return the result as a string
+func (w *Worker) callContract(tx *types.Transaction) (string, error) {
+
+	start := time.Now()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	data := hexutil.Bytes(tx.Data())
+	args := sendTxArgs{
+		Nonce:    hexutil.Uint64(w.Nonce),
+		From:     w.Account.Hex(),
+		To:       tx.To().Hex(),
+		Gas:      hexutil.Uint64(tx.Gas()),
+		GasPrice: hexutil.Big(*tx.GasPrice()),
+		Value:    hexutil.Big(*tx.Value()),
+		Data:     &data,
+	}
+	var retValue string
+	err := w.RPC.CallContext(ctx, &retValue, "eth_call", args, "latest")
+	if err != nil {
+		return "", fmt.Errorf("Contract call failed: %s", err)
+	}
+	callTime := time.Now().Sub(start)
+	w.info("Call result: '%s' [%.2fs]", retValue, callTime.Seconds())
+	return retValue, nil
+}
+
 // signAndSendTxn externally signs and sends a transaction
 func (w *Worker) signAndSendTxn(ctx context.Context, tx *types.Transaction) (string, error) {
 	signedTx, _ := types.SignTx(tx, w.Signer, w.PrivateKey)
@@ -214,6 +242,7 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*txnReceipt, error
 		w.Nonce++
 		// Wait for mining
 		start := time.Now()
+		w.debug("Waiting for %d seconds for tx be mined in next block", w.Exerciser.ReceiptWaitMin)
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 		receipt, err = w.waitUntilMined(start, txHash)
 		if err != nil {
@@ -286,6 +315,13 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 	return &contractAddr, nil
 }
 
+// Call executes a contract once and returns
+func (w *Worker) CallOnce() error {
+	tx := w.generateTransaction()
+	_, err := w.callContract(tx)
+	return err
+}
+
 // Run executes the specified exerciser workload then exits
 func (w *Worker) Run() {
 	log.Debug(w.Name, ": started. ", w.Exerciser.TxnsPerLoop, " tx/loop for ", w.Exerciser.Loops, " loops. Account=", w.Account.Hex())
@@ -311,6 +347,7 @@ func (w *Worker) Run() {
 		// Wait for number of configurable number of seconds before attempting
 		// to check for the transaction receipt.
 		// ** This should be greater than the block period **
+		w.debug("Waiting for %d seconds for tx be mined in next block", w.Exerciser.ReceiptWaitMin)
 		start := time.Now()
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 

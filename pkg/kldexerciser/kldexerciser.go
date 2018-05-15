@@ -94,18 +94,24 @@ func (e *Exerciser) Start() error {
 	}
 	log.Info("Contract address=", e.To.Hex())
 
-	log.Debug("Starting workers. Count=", e.Workers)
-	var wg sync.WaitGroup
-	for i := 0; i < len(workers); i++ {
-		worker := &workers[i]
-		wg.Add(1)
-		go func(worker *Worker) {
-			worker.Run()
-			wg.Done()
-		}(worker)
+	if e.Call {
+		log.Debug("Calling contract")
+		if err := workers[0].CallOnce(); err != nil {
+			return err
+		}
+	} else {
+		log.Debug("Starting workers. Count=", e.Workers)
+		var wg sync.WaitGroup
+		for i := 0; i < len(workers); i++ {
+			worker := &workers[i]
+			wg.Add(1)
+			go func(worker *Worker) {
+				worker.Run()
+				wg.Done()
+			}(worker)
+		}
+		wg.Wait()
+		log.Info("All workers complete. Success=", e.TotalSuccesses, " Failure=", e.TotalFailures)
 	}
-	wg.Wait()
-	log.Debug("All workers complete. Success=", e.TotalSuccesses, " Failure=", e.TotalFailures)
-
 	return nil
 }
