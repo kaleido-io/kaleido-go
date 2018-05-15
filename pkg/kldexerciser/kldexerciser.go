@@ -26,6 +26,7 @@ import (
 // Exerciser is the Kaleido go-ethereum exerciser
 type Exerciser struct {
 	URL            string
+	Call           bool
 	Contract       string
 	To             *common.Address
 	Method         string

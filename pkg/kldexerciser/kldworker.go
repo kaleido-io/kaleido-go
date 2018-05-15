@@ -110,7 +110,7 @@ func (w *Worker) sendTransaction(tx *types.Transaction) (string, error) {
 type sendTxArgs struct {
 	Nonce    hexutil.Uint64 `json:"nonce"`
 	From     string         `json:"from"`
-	To       string         `json:"to"`
+	To       string         `json:"to,omitempty"`
 	Gas      hexutil.Uint64 `json:"gas"`
 	GasPrice hexutil.Big    `json:"gasPrice"`
 	Value    hexutil.Big    `json:"value"`
@@ -120,19 +120,17 @@ type sendTxArgs struct {
 // sendUnsignedTxn sends a transaction for internal signing by the node
 func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (string, error) {
 	data := hexutil.Bytes(tx.Data())
-	var to = tx.To()
-	if to == nil {
-		var emptyTo common.Address
-		to = &emptyTo
-	}
 	args := sendTxArgs{
 		Nonce:    hexutil.Uint64(w.Nonce),
 		From:     w.Account.Hex(),
-		To:       to.Hex(),
 		Gas:      hexutil.Uint64(tx.Gas()),
 		GasPrice: hexutil.Big(*tx.GasPrice()),
 		Value:    hexutil.Big(*tx.Value()),
 		Data:     &data,
+	}
+	var to = tx.To()
+	if to != nil {
+		args.To = to.Hex()
 	}
 	var txHash string
 	err := w.RPC.CallContext(ctx, &txHash, "eth_sendTransaction", args)
