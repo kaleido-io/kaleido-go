@@ -5,12 +5,16 @@ Chain exerciser example in Golang for Ethereum permissioned chains.
 Built as a sample and exerciser for the [kaleido.io](https://kaleido.io) platform,
 and compatible with other Ethereum chains.
 
+Tested with [go-ethereum](https://github.com/ethereum/go-ethereum/) and
+[Quorum](https://github.com/jpmorganchase/quorum) permissioned chains.
+
 The exerciser uses the go-ethererum JSON/RPC client to provide a simple command-line
 interface and code samples for:
 - Compiling and executing Solidity smart contracts
 - Submitting transactions to be signed by the go-ethereum (geth) node
 - Externally signing transactions (using [EIP155](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-155.md) signing)
 - Checking for transaction receipts
+- Private Transactions compatible with Quorum, and the [EEA Enterprise Ethereum Client Specification V1](https://entethalliance.org/resources/)
 
 ## License
 
@@ -41,8 +45,8 @@ Flags:
   -h, --help                     help for kaleido-go
   -l, --loops int                Loops to perform in each worker before exiting (0=infinite) (default 1)
   -m, --method string            Method name in the contract to invoke
-  -P, --privateFor stringArray   Private for (see EEA Client Spec V1)
-  -p, --privateFrom string       Private from (see EEA Client Spec V1)
+  -P, --privateFor stringArray   Private for (see Quorum and EEA Client Spec)
+  -p, --privateFrom string       Private from (see Quorum and EEA Client Spec)
   -S, --seconds-max int          Time in seconds before timing out waiting for a txn receipt (default 20)
   -s, --seconds-min int          Time in seconds to wait before checking for a txn receipt (default 11)
   -t, --transactions int         Count of transactions submit on each worker loop (default 1)
