@@ -36,6 +36,8 @@ type Exerciser struct {
 	Amount         int64
 	GasPrice       int64
 	Gas            int64
+	PrivateFrom    string
+	PrivateFor     []string
 	Loops          int
 	TxnsPerLoop    int
 	ReceiptWaitMin int
@@ -52,9 +54,7 @@ type Exerciser struct {
 // Start initializes the workers for the specified config
 func (e *Exerciser) Start() error {
 
-	if e.ExternalSign && e.ChainID <= 0 {
-		return fmt.Errorf("ChainID not supplied. Required for external signing")
-	} else if !e.ExternalSign && len(e.Accounts) < e.Workers {
+	if !e.ExternalSign && len(e.Accounts) < e.Workers {
 		return fmt.Errorf("Need accounts for each of %d workers (%d supplied)", e.Workers, len(e.Accounts))
 	}
 
@@ -64,6 +64,13 @@ func (e *Exerciser) Start() error {
 		return err
 	}
 	log.Info("Exercising method '", e.Method, "' in solidity contract ", e.SolidityFile)
+
+	if e.PrivateFrom != "" {
+		if e.ExternalSign {
+			return fmt.Errorf("External signing not currently supported with private transactions")
+		}
+		log.Debug("PrivateFrom='", e.PrivateFrom, "' PrivateFor='", e.PrivateFor, "'")
+	}
 
 	log.Debug("Connecting workers. Count=", e.Workers)
 	var workers = make([]Worker, e.Workers)
@@ -78,10 +85,18 @@ func (e *Exerciser) Start() error {
 		}
 	}
 
+	firstWorker := &workers[0]
+
+	if e.ExternalSign && e.ChainID <= 0 {
+		if e.ChainID, err = firstWorker.GetNetworkID(); err != nil {
+			return err
+		}
+		log.Debug("ChainID=", e.ChainID)
+	}
+
 	if e.Contract == "" {
-		worker := &workers[0]
-		log.Info("Deploying contract using worker ", worker.Name)
-		e.To, err = worker.InstallContract()
+		log.Info("Deploying contract using worker ", firstWorker.Name)
+		e.To, err = firstWorker.InstallContract()
 		if err != nil {
 			return err
 		}

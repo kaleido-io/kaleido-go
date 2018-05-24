@@ -20,6 +20,7 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -115,6 +116,9 @@ type sendTxArgs struct {
 	GasPrice hexutil.Big    `json:"gasPrice"`
 	Value    hexutil.Big    `json:"value"`
 	Data     *hexutil.Bytes `json:"data"`
+	// EEA spec extensions
+	PrivateFrom string   `json:"privateFrom,omitempty"`
+	PrivateFor  []string `json:"privateFor,omitempty"`
 }
 
 // sendUnsignedTxn sends a transaction for internal signing by the node
@@ -127,6 +131,10 @@ func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (st
 		GasPrice: hexutil.Big(*tx.GasPrice()),
 		Value:    hexutil.Big(*tx.Value()),
 		Data:     &data,
+	}
+	if w.Exerciser.PrivateFrom != "" {
+		args.PrivateFrom = w.Exerciser.PrivateFrom
+		args.PrivateFor = w.Exerciser.PrivateFor
 	}
 	var to = tx.To()
 	if to != nil {
@@ -183,16 +191,16 @@ func (w *Worker) signAndSendTxn(ctx context.Context, tx *types.Transaction) (str
 }
 
 type txnReceipt struct {
-	BlockHash         string `json:"blockHash"`
-	BlockNumber       string `json:"blockNumber"`
-	ContractAddress   string `json:"contractAddress"`
-	CumulativeGasUsed string `json:"cumulativeGasUsed"`
-	TransactionHash   string `json:"transactionHash"`
-	From              string `json:"from"`
-	GasUsed           string `json:"gasUsed"`
-	Status            string `json:"status"`
-	To                string `json:"to"`
-	TransactionIndex  string `json:"transactionIndex"`
+	BlockHash         *common.Hash    `json:"blockHash"`
+	BlockNumber       *hexutil.Big    `json:"blockNumber"`
+	ContractAddress   *common.Address `json:"contractAddress"`
+	CumulativeGasUsed *hexutil.Big    `json:"cumulativeGasUsed"`
+	TransactionHash   *common.Hash    `json:"transactionHash"`
+	From              *common.Address `json:"from"`
+	GasUsed           *hexutil.Big    `json:"gasUsed"`
+	Status            *hexutil.Big    `json:"status"`
+	To                *common.Address `json:"to"`
+	TransactionIndex  *hexutil.Uint   `json:"transactionIndex"`
 }
 
 // WaitUntilMined waits until a given transaction has been mined
@@ -214,15 +222,18 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, er
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
 
-		isMined = receipt.Status == "0x1"
+		isMined = receipt.BlockNumber != nil && receipt.BlockNumber.ToInt().Uint64() > 0
 		w.info("TX:%s Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
-		w.debug("Status=%s BlockNumber=%s BlockHash=%s TransactionIndex=%s GasUsed=%s CumulativeGasUsed=%s",
-			receipt.Status, receipt.BlockNumber, receipt.BlockHash, receipt.TransactionIndex, receipt.GasUsed, receipt.CumulativeGasUsed)
+		if receipt.Status != nil {
+			w.debug("Status=%s BlockNumber=%s BlockHash=%x TransactionIndex=%d GasUsed=%s CumulativeGasUsed=%s",
+				receipt.Status.ToInt(), receipt.BlockNumber.ToInt(), receipt.BlockHash,
+				receipt.TransactionIndex, receipt.GasUsed.ToInt(), receipt.CumulativeGasUsed.ToInt())
+		}
 		if !isMined && elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
-			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs: %s", elapsed.Seconds(), err)
+			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs", elapsed.Seconds())
 		}
 		if !isMined {
 			time.Sleep(retryDelay)
@@ -264,6 +275,20 @@ func (w *Worker) initializeNonce(address string) error {
 		return fmt.Errorf("Failed to parse transaction count '%s' for %s: %s", result, address, err)
 	}
 	return nil
+}
+
+// GetNetworkID returns the network ID from the node
+func (w *Worker) GetNetworkID() (int64, error) {
+	var strNetworkID string
+	err := w.RPC.Call(&strNetworkID, "net_version")
+	if err != nil {
+		return 0, fmt.Errorf("Failed to query network ID (to use as chain ID in EIP155 signing): %s", err)
+	}
+	networkID, err := strconv.ParseInt(strNetworkID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("Failed to parse network ID returned from node '%s': %s", strNetworkID, err)
+	}
+	return networkID, nil
 }
 
 // Init the account and connection for this worker
@@ -311,11 +336,10 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Failed to install contract: %s", err)
 	}
-	contractAddr := common.HexToAddress(receipt.ContractAddress)
-	return &contractAddr, nil
+	return receipt.ContractAddress, nil
 }
 
-// Call executes a contract once and returns
+// CallOnce executes a contract once and returns
 func (w *Worker) CallOnce() error {
 	tx := w.generateTransaction()
 	_, err := w.callContract(tx)
@@ -356,7 +380,7 @@ func (w *Worker) Run() {
 		for _, txHash := range txHashes {
 			_, err := w.waitUntilMined(start, txHash)
 			if err != nil {
-				w.error("TX:%s failed checking receipt: %s", err)
+				w.error("TX:%s failed checking receipt: %s", txHash, err)
 			} else {
 				loopSuccesses++
 			}

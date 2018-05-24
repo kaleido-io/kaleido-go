@@ -44,7 +44,7 @@ var exerciser kldexerciser.Exerciser
 func init() {
 	cmd.Flags().StringArrayVarP(&exerciser.Accounts, "accounts", "a", []string{}, "Account addresses - 1 per worker needed for geth signing")
 	cmd.Flags().StringArrayVarP(&exerciser.Args, "args", "x", []string{}, "String arguments to pass to contract method (auto-converted to type)")
-	cmd.Flags().Int64VarP(&exerciser.ChainID, "chainid", "i", 0, "Chain ID - required for external signing")
+	cmd.Flags().Int64VarP(&exerciser.ChainID, "chainid", "i", 0, "Chain ID for EIP155 signing (networkid queried if omitted)")
 	cmd.Flags().BoolVarP(&exerciser.Call, "call", "C", false, "Call the contract and return a value, rather than sending a txn")
 	cmd.Flags().StringVarP(&exerciser.Contract, "contract", "c", "", "Pre-deployed contract address. Will be deployed if not specified")
 	cmd.Flags().IntVarP(&exerciser.DebugLevel, "debug", "d", 1, "0=error, 1=info, 2=debug")
@@ -54,6 +54,8 @@ func init() {
 	cmd.Flags().Int64VarP(&exerciser.GasPrice, "gasprice", "G", 0, "Gas price")
 	cmd.Flags().IntVarP(&exerciser.Loops, "loops", "l", 1, "Loops to perform in each worker before exiting (0=infinite)")
 	cmd.Flags().StringVarP(&exerciser.Method, "method", "m", "", "Method name in the contract to invoke")
+	cmd.Flags().StringArrayVarP(&exerciser.PrivateFor, "privateFor", "P", []string{}, "Private for (see EEA Client Spec V1)")
+	cmd.Flags().StringVarP(&exerciser.PrivateFrom, "privateFrom", "p", "", "Private from (see EEA Client Spec V1)")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMin, "seconds-min", "s", 11, "Time in seconds to wait before checking for a txn receipt")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMax, "seconds-max", "S", 20, "Time in seconds before timing out waiting for a txn receipt")
 	cmd.Flags().IntVarP(&exerciser.TxnsPerLoop, "transactions", "t", 1, "Count of transactions submit on each worker loop")

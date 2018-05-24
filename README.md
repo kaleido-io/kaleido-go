@@ -28,24 +28,26 @@ Usage:
   kaleido-go [flags]
 
 Flags:
-  -a, --accounts stringArray   Account addresses - 1 per worker needed for geth signing
-  -x, --args stringArray       String arguments to pass to contract method (auto-converted to type)
-  -C, --call                   Call the contract and return a value, rather than sending a txn
-  -i, --chainid int            Chain ID - required for external signing
-  -c, --contract string        Pre-deployed contract address. Will be deployed if not specified
-  -d, --debug int              0=error, 1=info, 2=debug (default 1)
-  -e, --extsign                Sign externally with generated private keys + accounts
-  -f, --file string            Solidity smart contract source. Deployed if --contract not supplied
-  -g, --gas int                Gas limit on the transaction (default 1000000)
-  -G, --gasprice int           Gas price
-  -h, --help                   help for kaleido-go
-  -l, --loops int              Loops to perform in each worker before exiting (0=infinite) (default 1)
-  -m, --method string          Method name in the contract to invoke
-  -S, --seconds-max int        Time in seconds before timing out waiting for a txn receipt (default 20)
-  -s, --seconds-min int        Time in seconds to wait before checking for a txn receipt (default 11)
-  -t, --transactions int       Count of transactions submit on each worker loop (default 1)
-  -u, --url string             JSON/RPC URL for Ethereum node: https://user:pass@xyz-rpc.kaleido.io
-  -w, --workers int            Number of workers to run (default 1)
+  -a, --accounts stringArray     Account addresses - 1 per worker needed for geth signing
+  -x, --args stringArray         String arguments to pass to contract method (auto-converted to type)
+  -C, --call                     Call the contract and return a value, rather than sending a txn
+  -i, --chainid int              Chain ID for EIP155 signing (networkid queried if omitted)
+  -c, --contract string          Pre-deployed contract address. Will be deployed if not specified
+  -d, --debug int                0=error, 1=info, 2=debug (default 1)
+  -e, --extsign                  Sign externally with generated private keys + accounts
+  -f, --file string              Solidity smart contract source. Deployed if --contract not supplied
+  -g, --gas int                  Gas limit on the transaction (default 1000000)
+  -G, --gasprice int             Gas price
+  -h, --help                     help for kaleido-go
+  -l, --loops int                Loops to perform in each worker before exiting (0=infinite) (default 1)
+  -m, --method string            Method name in the contract to invoke
+  -P, --privateFor stringArray   Private for (see EEA Client Spec V1)
+  -p, --privateFrom string       Private from (see EEA Client Spec V1)
+  -S, --seconds-max int          Time in seconds before timing out waiting for a txn receipt (default 20)
+  -s, --seconds-min int          Time in seconds to wait before checking for a txn receipt (default 11)
+  -t, --transactions int         Count of transactions submit on each worker loop (default 1)
+  -u, --url string               JSON/RPC URL for Ethereum node: https://user:pass@xyz-rpc.kaleido.io
+  -w, --workers int              Number of workers to run (default 1)
 ```
 
 ## Build
@@ -59,8 +61,6 @@ make
 Example commands below expect you to have set the following parameters:
 
 ```sh
-# The Chain ID shown on the environment
-CHAIN_ID=12345678
 # The full Node URL including any application credentials
 NODE_URL="https://user:pass@nodeurl-rpc.kaleido.io"
 # Account existing on the node
@@ -74,7 +74,7 @@ Shell Command (linux/mac):
 ```sh
 ./kaleido-go -f examples/simplestorage.sol \
   -m set -x 12345 \
-  -i "$CHAIN_ID" -u "$NODE_URL" -a "$ACCOUNT"
+  -u "$NODE_URL" -a "$ACCOUNT"
 ```
 
 > You can enable DEBUG output with `-d 2`
@@ -91,7 +91,7 @@ INFO[2018-05-14T22:58:54-04:00] W0000/L0000/N000128: TX:0x51a62f3922f59405e86f85
 INFO[2018-05-14T22:59:05-04:00] W0000/L0000/N000129: TX:0x51a62f3922f59405e86f85d79ad79bfcfdf24305ac4b103c6fe0ca6cd97105c3 Mined=true after 11.17s [0.17s]
 ```
 
-# Call the contract deployed to get the value
+# Call the deployed contract to get the value
 
 
 Shell Command (linux/mac):
@@ -99,7 +99,7 @@ Shell Command (linux/mac):
 ```sh
 ./kaleido-go -f examples/simplestorage.sol \
   -m get -C -c 0x2C13d6D15975EfbF7DfD2bFdaFe7413e391eFc65 \
-  -i "$CHAIN_ID" -u "$NODE_URL" -a "$ACCOUNT"
+  -u "$NODE_URL" -a "$ACCOUNT"
 ```
 
 > TODO: Perform data-type sensitive parsing of return values
@@ -109,4 +109,28 @@ Example output:
 INFO[2018-05-14T23:01:26-04:00] Exercising method 'get' in solidity contract examples/simplestorage.sol
 INFO[2018-05-14T23:01:26-04:00] Contract address=0x2C13d6D15975EfbF7DfD2bFdaFe7413e391eFc65
 INFO[2018-05-14T23:01:26-04:00] W0000/L0000/N000129: Call result: '0x0000000000000000000000000000000000000000000000000000000000003039' [0.04s]
+```
+
+# Send 10 private transactions with debug and custom wait times
+
+> Private transactions can only currently be signed on the node
+
+Shell Command (linux/mac):
+
+```sh
+./kaleido-go -f examples/simplestorage.sol -m set -x 12345 \
+  -t 10 \
+  -p xoA1FQSUHpslp7lJWgRQXDErm/nsP7/CpBOWf6M3VTI= -P p3+cTaDZ9Lw1EPlJlcM9hhezlXTqAEi6xi+LTDIdW2E= \
+  -s 15 -S 30 -d 3 \
+  -u "$NODE_URL" -a "$ACCOUNT"
+```
+
+# Send an externally signed transaction
+
+> The private keys will be randomly generated (and discarded), so this is only an example of external signing logic for exercising a node
+
+Shell Command (linux/mac):
+
+```sh
+./kaleido-go -f examples/simplestorage.sol -m set -x 12345 -u "$NODE_URL" -e
 ```
