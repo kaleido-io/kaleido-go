@@ -16,6 +16,11 @@ interface and code samples for:
 - Checking for transaction receipts
 - Private Transactions compatible with Quorum, and the [EEA Enterprise Ethereum Client Specification V1](https://entethalliance.org/resources/)
 
+## Installing (Mac/Linux/Windows)
+
+Grab the latest binary release from: https://github.com/kaleido-io/kaleido-go/releases
+Download, unzip and run.
+
 ## License
 
 This code is distributed under the [Apache 2 license](LICENSE).
