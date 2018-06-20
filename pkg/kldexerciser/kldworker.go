@@ -146,7 +146,7 @@ func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (st
 }
 
 // callContract call a transaction and return the result as a string
-func (w *Worker) callContract(tx *types.Transaction) (string, error) {
+func (w *Worker) callContract(tx *types.Transaction) (err error) {
 
 	start := time.Now()
 
@@ -163,14 +163,23 @@ func (w *Worker) callContract(tx *types.Transaction) (string, error) {
 		Value:    hexutil.Big(*tx.Value()),
 		Data:     &data,
 	}
-	var retValue string
-	err := w.RPC.CallContext(ctx, &retValue, "eth_call", args, "latest")
-	if err != nil {
-		return "", fmt.Errorf("Contract call failed: %s", err)
+
+	if w.Exerciser.EstimateGas {
+		var retValue hexutil.Uint64
+		err = w.RPC.CallContext(ctx, &retValue, "eth_estimateGas", args)
+		callTime := time.Now().Sub(start)
+		w.info("Estimate Gas result: %d [%.2fs]", retValue, callTime.Seconds())
+	} else {
+		var retValue string
+		err = w.RPC.CallContext(ctx, &retValue, "eth_call", args, "latest")
+		callTime := time.Now().Sub(start)
+		w.info("Call result: '%s' [%.2fs]", retValue, callTime.Seconds())
 	}
-	callTime := time.Now().Sub(start)
-	w.info("Call result: '%s' [%.2fs]", retValue, callTime.Seconds())
-	return retValue, nil
+	if err != nil {
+		return fmt.Errorf("Contract call failed: %s", err)
+	}
+
+	return
 }
 
 // signAndSendTxn externally signs and sends a transaction
@@ -342,7 +351,7 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 // CallOnce executes a contract once and returns
 func (w *Worker) CallOnce() error {
 	tx := w.generateTransaction()
-	_, err := w.callContract(tx)
+	err := w.callContract(tx)
 	return err
 }
 

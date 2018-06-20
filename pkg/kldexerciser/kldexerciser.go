@@ -27,8 +27,10 @@ import (
 type Exerciser struct {
 	URL            string
 	Call           bool
+	EstimateGas    bool
 	Contract       string
 	To             *common.Address
+	ContractName   string
 	Method         string
 	Args           []string
 	SolidityFile   string
@@ -59,7 +61,7 @@ func (e *Exerciser) Start() error {
 	}
 
 	log.Debug("Compiling solidity file ", e.SolidityFile)
-	compiled, err := CompileContract(e.SolidityFile, e.Method, e.Args)
+	compiled, err := CompileContract(e.SolidityFile, e.ContractName, e.Method, e.Args)
 	if err != nil {
 		return err
 	}
@@ -109,7 +111,7 @@ func (e *Exerciser) Start() error {
 	}
 	log.Info("Contract address=", e.To.Hex())
 
-	if e.Call {
+	if e.Call || e.EstimateGas {
 		log.Debug("Calling contract")
 		if err := workers[0].CallOnce(); err != nil {
 			return err

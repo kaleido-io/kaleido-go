@@ -80,7 +80,7 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]inte
 }
 
 // CompileContract uses solc to compile the Solidity source and
-func CompileContract(solidityFile, method string, args []string) (*CompiledSolidity, error) {
+func CompileContract(solidityFile, contractName string, method string, args []string) (*CompiledSolidity, error) {
 	var c CompiledSolidity
 
 	// Compile the solidity
@@ -90,12 +90,19 @@ func CompileContract(solidityFile, method string, args []string) (*CompiledSolid
 	}
 
 	// Check we only have one conract and grab the code/info
+	var contract *compiler.Contract
 	contractNames := reflect.ValueOf(compiled).MapKeys()
-	if len(contractNames) != 1 {
-		return nil, fmt.Errorf("Did not find exactly one contracts in Solidity file: %s", contractNames)
+	if contractName != "" {
+		if _, ok := compiled[contractName]; !ok {
+			return nil, fmt.Errorf("Contract %s not found in Solidity file: %s", contractName, contractNames)
+		}
+		contract = compiled[contractName]
+	} else if len(contractNames) != 1 {
+		return nil, fmt.Errorf("More than one contract in Solidity file, please set one to call: %s", contractNames)
+	} else {
+		contractName = contractNames[0].String()
+		contract = compiled[contractName]
 	}
-	contractName := contractNames[0].String()
-	contract := compiled[contractName]
 	c.ContractInfo = contract.Info
 	c.Compiled = contract.Code
 
