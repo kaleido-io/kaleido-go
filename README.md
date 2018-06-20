@@ -28,7 +28,7 @@ This code is distributed under the [Apache 2 license](LICENSE).
 ```
 Sample exerciser for Ethereum permissioned chains - from Kaleido
 
-Usage:
+sage:
   kaleido-go [flags]
 
 Flags:
@@ -37,7 +37,9 @@ Flags:
   -C, --call                     Call the contract and return a value, rather than sending a txn
   -i, --chainid int              Chain ID for EIP155 signing (networkid queried if omitted)
   -c, --contract string          Pre-deployed contract address. Will be deployed if not specified
+  -n, --contractname string      The name of the contract to call, for Solidity files with multiple contracts
   -d, --debug int                0=error, 1=info, 2=debug (default 1)
+  -E, --estimategas              Estimate the gas for the contract call, rather than sending a txn
   -e, --extsign                  Sign externally with generated private keys + accounts
   -f, --file string              Solidity smart contract source. Deployed if --contract not supplied
   -g, --gas int                  Gas limit on the transaction (default 1000000)
@@ -45,8 +47,8 @@ Flags:
   -h, --help                     help for kaleido-go
   -l, --loops int                Loops to perform in each worker before exiting (0=infinite) (default 1)
   -m, --method string            Method name in the contract to invoke
-  -P, --privateFor stringArray   Private for (see Quorum and EEA Client Spec)
-  -p, --privateFrom string       Private from (see Quorum and EEA Client Spec)
+  -P, --privateFor stringArray   Private for (see EEA Client Spec V1)
+  -p, --privateFrom string       Private from (see EEA Client Spec V1)
   -S, --seconds-max int          Time in seconds before timing out waiting for a txn receipt (default 20)
   -s, --seconds-min int          Time in seconds to wait before checking for a txn receipt (default 11)
   -t, --transactions int         Count of transactions submit on each worker loop (default 1)
