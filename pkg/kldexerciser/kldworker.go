@@ -20,11 +20,12 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strconv"
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	hexutil "github.com/ethereum/go-ethereum/common/hexutil"
 
 	"github.com/ethereum/go-ethereum"
 
@@ -231,6 +232,11 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, er
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
 
+		statusString := hexutil.EncodeBig(receipt.Status.ToInt())
+		zeroString := hexutil.EncodeBig(big.NewInt(0))
+		gasUsedString := hexutil.EncodeBig(receipt.GasUsed.ToInt())
+		gasProvidedString := hexutil.EncodeBig(big.NewInt(w.Exerciser.Gas))
+
 		isMined = receipt.BlockNumber != nil && receipt.BlockNumber.ToInt().Uint64() > 0
 		w.info("TX:%s Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
@@ -240,6 +246,13 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, er
 			w.debug("Status=%s BlockNumber=%s BlockHash=%x TransactionIndex=%d GasUsed=%s CumulativeGasUsed=%s",
 				receipt.Status.ToInt(), receipt.BlockNumber.ToInt(), receipt.BlockHash,
 				receipt.TransactionIndex, receipt.GasUsed.ToInt(), receipt.CumulativeGasUsed.ToInt())
+			if reflect.DeepEqual(statusString, zeroString) {
+				w.info("Transaction failed. Status=%s", receipt.Status.ToInt())
+				if reflect.DeepEqual(gasUsedString, gasProvidedString) {
+					w.info("Transaction ran out of gas before completion.")
+				}
+			}
+
 		}
 		if !isMined && elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
 			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs", elapsed.Seconds())
