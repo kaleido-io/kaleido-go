@@ -51,6 +51,7 @@ type Exerciser struct {
 	Accounts       []string
 	TotalSuccesses uint64
 	TotalFailures  uint64
+	Nonce          int64
 }
 
 // Start initializes the workers for the specified config

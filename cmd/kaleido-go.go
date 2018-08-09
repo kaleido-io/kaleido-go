@@ -28,13 +28,11 @@ func initLogging(debugLevel int) {
 	switch debugLevel {
 	case 0:
 		log.SetLevel(log.ErrorLevel)
-		break
 	case 1:
 		log.SetLevel(log.InfoLevel)
-		break
 	default:
+		debugLevel = 2
 		log.SetLevel(log.DebugLevel)
-		break
 	}
 	log.Debug("Debug level ", debugLevel)
 }
@@ -49,6 +47,7 @@ func init() {
 	cmd.Flags().StringVarP(&exerciser.Contract, "contract", "c", "", "Pre-deployed contract address. Will be deployed if not specified")
 	cmd.Flags().StringVarP(&exerciser.ContractName, "contractname", "n", "", "The name of the contract to call, for Solidity files with multiple contracts")
 	cmd.Flags().IntVarP(&exerciser.DebugLevel, "debug", "d", 1, "0=error, 1=info, 2=debug")
+	cmd.Flags().Int64VarP(&exerciser.Nonce, "nonce", "N", -1, "Nonce (transaction number) for the next transaction")
 	cmd.Flags().BoolVarP(&exerciser.ExternalSign, "extsign", "e", false, "Sign externally with generated private keys + accounts")
 	cmd.Flags().BoolVarP(&exerciser.EstimateGas, "estimategas", "E", false, "Estimate the gas for the contract call, rather than sending a txn")
 	cmd.Flags().StringVarP(&exerciser.SolidityFile, "file", "f", "", "Solidity smart contract source. Deployed if --contract not supplied")
