@@ -232,17 +232,16 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, er
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
 
-		statusString := hexutil.EncodeBig(receipt.Status.ToInt())
-		zeroString := hexutil.EncodeBig(big.NewInt(0))
-		gasUsedString := hexutil.EncodeBig(receipt.GasUsed.ToInt())
-		gasProvidedString := hexutil.EncodeBig(big.NewInt(w.Exerciser.Gas))
-
 		isMined = receipt.BlockNumber != nil && receipt.BlockNumber.ToInt().Uint64() > 0
 		w.info("TX:%s Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
 		if receipt.Status != nil {
+			statusString := hexutil.EncodeBig(receipt.Status.ToInt())
+			zeroString := hexutil.EncodeBig(big.NewInt(0))
+			gasUsedString := hexutil.EncodeBig(receipt.GasUsed.ToInt())
+			gasProvidedString := hexutil.EncodeBig(big.NewInt(w.Exerciser.Gas))
 			w.debug("Status=%s BlockNumber=%s BlockHash=%x TransactionIndex=%d GasUsed=%s CumulativeGasUsed=%s",
 				receipt.Status.ToInt(), receipt.BlockNumber.ToInt(), receipt.BlockHash,
 				receipt.TransactionIndex, receipt.GasUsed.ToInt(), receipt.CumulativeGasUsed.ToInt())
