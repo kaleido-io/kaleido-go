@@ -373,8 +373,8 @@ func (w *Worker) Run() {
 				w.error("TX send failed (%d/%d): %s", i, w.Exerciser.TxnsPerLoop, err)
 			} else {
 				txHashes = append(txHashes, txHash)
+				w.Nonce++
 			}
-			w.Nonce++
 		}
 
 		// Transactions will not be mined immediately.
