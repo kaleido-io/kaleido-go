@@ -20,7 +20,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"reflect"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -238,20 +237,9 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, er
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
 		if receipt.Status != nil {
-			statusString := hexutil.EncodeBig(receipt.Status.ToInt())
-			zeroString := hexutil.EncodeBig(big.NewInt(0))
-			gasUsedString := hexutil.EncodeBig(receipt.GasUsed.ToInt())
-			gasProvidedString := hexutil.EncodeBig(big.NewInt(w.Exerciser.Gas))
 			w.debug("Status=%s BlockNumber=%s BlockHash=%x TransactionIndex=%d GasUsed=%s CumulativeGasUsed=%s",
 				receipt.Status.ToInt(), receipt.BlockNumber.ToInt(), receipt.BlockHash,
 				receipt.TransactionIndex, receipt.GasUsed.ToInt(), receipt.CumulativeGasUsed.ToInt())
-			if reflect.DeepEqual(statusString, zeroString) {
-				w.info("Transaction failed. Status=%s", receipt.Status.ToInt())
-				if reflect.DeepEqual(gasUsedString, gasProvidedString) {
-					w.info("Transaction ran out of gas before completion.")
-				}
-			}
-
 		}
 		if !isMined && elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
 			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs", elapsed.Seconds())
@@ -287,13 +275,14 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*txnReceipt, error
 // initializeNonce get the initial nonce to use
 func (w *Worker) initializeNonce(address string) error {
 	var result hexutil.Uint64
-	err := w.RPC.Call(&result, "eth_getTransactionCount", address, "latest")
-	if err != nil {
-		return fmt.Errorf("Failed to get transaction count for %s: %s", address, err)
-	}
-	w.Nonce = uint64(result)
-	if err != nil {
-		return fmt.Errorf("Failed to parse transaction count '%s' for %s: %s", result, address, err)
+	if w.Exerciser.Nonce == -1 {
+		err := w.RPC.Call(&result, "eth_getTransactionCount", address, "latest")
+		if err != nil {
+			return fmt.Errorf("Failed to get transaction count '%s' for %s: %s", result, address, err)
+		}
+		w.Nonce = uint64(result)
+	} else {
+		w.Nonce = uint64(w.Exerciser.Nonce)
 	}
 	return nil
 }
@@ -383,8 +372,8 @@ func (w *Worker) Run() {
 			if err != nil {
 				w.error("TX send failed (%d/%d): %s", i, w.Exerciser.TxnsPerLoop, err)
 			} else {
-				w.Nonce++
 				txHashes = append(txHashes, txHash)
+				w.Nonce++
 			}
 		}
 
@@ -392,16 +381,22 @@ func (w *Worker) Run() {
 		// Wait for number of configurable number of seconds before attempting
 		// to check for the transaction receipt.
 		// ** This should be greater than the block period **
-		w.debug("Waiting for %d seconds for tx be mined in next block", w.Exerciser.ReceiptWaitMin)
+		w.debug("Waiting for %d seconds for tx to be mined in next block", w.Exerciser.ReceiptWaitMin)
 		start := time.Now()
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 
-		// Wait the receipts of all successfully set transctions
+		// Wait for the receipts of all successfully set transctions
 		var loopSuccesses uint64
 		for _, txHash := range txHashes {
-			_, err := w.waitUntilMined(start, txHash)
+			receipt, err := w.waitUntilMined(start, txHash)
 			if err != nil {
 				w.error("TX:%s failed checking receipt: %s", txHash, err)
+			} else if receipt.Status.ToInt().Uint64() == 0 {
+				w.error("TX:%s failed. Status=%s", txHash, receipt.Status.ToInt())
+				// If gasUsed == gasProvided, then you ran out of gas
+				if receipt.GasUsed.ToInt().Uint64() == uint64(w.Exerciser.Gas) {
+					w.error("TX ran out of gas before completion.")
+				}
 			} else {
 				loopSuccesses++
 			}

@@ -52,6 +52,7 @@ Flags:
   -h, --help                     help for kaleido-go
   -l, --loops int                Loops to perform in each worker before exiting (0=infinite) (default 1)
   -m, --method string            Method name in the contract to invoke
+  -N, --nonce int                Nonce (transaction number) for next transaction
   -P, --privateFor stringArray   Private for (see EEA Client Spec V1)
   -p, --privateFrom string       Private from (see EEA Client Spec V1)
   -S, --seconds-max int          Time in seconds before timing out waiting for a txn receipt (default 20)
