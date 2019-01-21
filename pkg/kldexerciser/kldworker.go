@@ -20,17 +20,18 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"strconv"
+	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	hexutil "github.com/ethereum/go-ethereum/common/hexutil"
 
 	"github.com/ethereum/go-ethereum"
+	ecrypto "github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	ecrypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	log "github.com/sirupsen/logrus"
@@ -38,16 +39,21 @@ import (
 
 // Worker runs the specified number transactions the specified number of times then exits
 type Worker struct {
-	Index            int
-	Name             string
-	LoopIndex        uint64
-	Exerciser        *Exerciser
-	Nonce            uint64
-	CompiledContract *CompiledSolidity
-	RPC              *rpc.Client
-	Account          common.Address
-	PrivateKey       *ecdsa.PrivateKey
-	Signer           types.EIP155Signer
+	Index                 int
+	Name                  string
+	LoopIndex             uint64
+	Exerciser             *Exerciser
+	Nonce                 uint64
+	CompiledContract      *CompiledSolidity
+	RPC                   *rpc.Client
+	Account               common.Address
+	PrivateKey            *ecdsa.PrivateKey
+	Signer                types.EIP155Signer
+	servername            string
+	pid                   int
+	graphiteMetrics       bool
+	telegrafMetricsFormat bool
+	lastMiningTime        time.Duration
 }
 
 func (w Worker) debug(message string, inserts ...interface{}) {
@@ -60,18 +66,6 @@ func (w Worker) info(message string, inserts ...interface{}) {
 
 func (w Worker) error(message string, inserts ...interface{}) {
 	log.Error(fmt.Sprintf("%s/L%04d/N%06d: ", w.Name, w.LoopIndex, w.Nonce), fmt.Sprintf(message, inserts...))
-}
-
-// generateAccount generates a new account for this worker to use in external signing
-func (w *Worker) generateAccount() error {
-	key, err := ecrypto.GenerateKey()
-	if err != nil {
-		return fmt.Errorf("Generating key: %s", err)
-	}
-	w.PrivateKey = key
-	w.Account = ecrypto.PubkeyToAddress(key.PublicKey)
-	w.Signer = types.NewEIP155Signer(big.NewInt(w.Exerciser.ChainID))
-	return nil
 }
 
 // generateTransaction creates a new transaction for the specified data
@@ -92,18 +86,29 @@ func (w *Worker) generateTransaction() *types.Transaction {
 func (w *Worker) sendTransaction(tx *types.Transaction) (string, error) {
 	start := time.Now()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	var err error
 	var txHash string
 	if w.Exerciser.ExternalSign {
-		txHash, err = w.signAndSendTxn(ctx, tx)
+		txHash, err = w.signAndSendTxn(tx)
 	} else {
-		txHash, err = w.sendUnsignedTxn(ctx, tx)
+		txHash, err = w.sendUnsignedTxn(tx)
 	}
 	callTime := time.Now().Sub(start)
 	ok := (err == nil)
+
+	w.incrCounter("tx.sub")
+	if ok {
+		w.incrCounter("tx.sent")
+	} else {
+		w.incrCounter("tx.sendfail")
+		w.incrCounter("tx.fail")
+	}
+
+	if !ok && (strings.Contains(err.Error(), "known transaction") || strings.Contains(err.Error(), "nonce too low")) {
+		// Bump the nonce for the next attempt
+		w.Nonce++
+	}
+
 	w.info("TX:%s Sent. OK=%t [%.2fs]", txHash, ok, callTime.Seconds())
 	return txHash, err
 }
@@ -122,7 +127,7 @@ type sendTxArgs struct {
 }
 
 // sendUnsignedTxn sends a transaction for internal signing by the node
-func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (string, error) {
+func (w *Worker) sendUnsignedTxn(tx *types.Transaction) (string, error) {
 	data := hexutil.Bytes(tx.Data())
 	args := sendTxArgs{
 		Nonce:    hexutil.Uint64(w.Nonce),
@@ -141,17 +146,54 @@ func (w *Worker) sendUnsignedTxn(ctx context.Context, tx *types.Transaction) (st
 		args.To = to.Hex()
 	}
 	var txHash string
-	err := w.RPC.CallContext(ctx, &txHash, "eth_sendTransaction", args)
+	err := w.rpcCall(&txHash, "eth_sendTransaction", args)
 	return txHash, err
+}
+
+// Formatter for Telegraf/InfluxDB style statsd metrics formatting
+func (w *Worker) telegrafMetricsFormatter(stat string) string {
+	return fmt.Sprintf("%s,server=%s,pid=%d,worker=%d", stat, w.servername, w.pid, w.Index)
+}
+
+// Formatter for Graphite style statsd metrics formatting
+func (w *Worker) graphiteMetricsFormatter(stat string) string {
+	return fmt.Sprintf("%s.P%06d%s.%s", w.servername, w.pid, w.Name, stat)
+}
+
+func (w *Worker) incrCounter(name string) {
+	if w.telegrafMetricsFormat {
+		w.Exerciser.metrics.Increment(w.telegrafMetricsFormatter(name))
+	} else {
+		w.Exerciser.metrics.Increment(w.graphiteMetricsFormatter(name))
+	}
+}
+
+func (w *Worker) emitTiming(name string, timing time.Duration) {
+	if w.telegrafMetricsFormat {
+		w.Exerciser.metrics.Gauge(w.telegrafMetricsFormatter(name), int(timing.Nanoseconds()/1000000))
+	} else {
+		w.Exerciser.metrics.Gauge(w.graphiteMetricsFormatter(name), int(timing.Nanoseconds()/1000000))
+	}
+}
+
+func (w *Worker) rpcCall(result interface{}, method string, args ...interface{}) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.Exerciser.RPCTimeout)*time.Second)
+	defer cancel()
+
+	w.incrCounter("rpc.calls")
+	err := w.RPC.CallContext(ctx, result, method, args...)
+	if err == nil {
+		w.incrCounter("rpc.success")
+	} else {
+		w.incrCounter("rpc.fail")
+	}
+	return err
 }
 
 // callContract call a transaction and return the result as a string
 func (w *Worker) callContract(tx *types.Transaction) (err error) {
 
 	start := time.Now()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 
 	data := hexutil.Bytes(tx.Data())
 	args := sendTxArgs{
@@ -166,12 +208,12 @@ func (w *Worker) callContract(tx *types.Transaction) (err error) {
 
 	if w.Exerciser.EstimateGas {
 		var retValue hexutil.Uint64
-		err = w.RPC.CallContext(ctx, &retValue, "eth_estimateGas", args)
+		err = w.rpcCall(&retValue, "eth_estimateGas", args)
 		callTime := time.Now().Sub(start)
 		w.info("Estimate Gas result: %d [%.2fs]", retValue, callTime.Seconds())
 	} else {
 		var retValue string
-		err = w.RPC.CallContext(ctx, &retValue, "eth_call", args, "latest")
+		err = w.rpcCall(&retValue, "eth_call", args, "latest")
 		callTime := time.Now().Sub(start)
 		w.info("Call result: '%s' [%.2fs]", retValue, callTime.Seconds())
 	}
@@ -183,19 +225,22 @@ func (w *Worker) callContract(tx *types.Transaction) (err error) {
 }
 
 // signAndSendTxn externally signs and sends a transaction
-func (w *Worker) signAndSendTxn(ctx context.Context, tx *types.Transaction) (string, error) {
+func (w *Worker) signAndSendTxn(tx *types.Transaction) (string, error) {
 	signedTx, _ := types.SignTx(tx, w.Signer, w.PrivateKey)
 	var buff bytes.Buffer
 	signedTx.EncodeRLP(&buff)
 	from, _ := types.Sender(w.Signer, signedTx)
 	w.debug("TX signed. ChainID=%d From=%s", w.Exerciser.ChainID, from.Hex())
+	if from.Hex() != w.Account.Hex() {
+		return "", fmt.Errorf("EIP155 signing failed - Account=%s From=%s", w.Account.Hex(), from.Hex())
+	}
 
 	var txHash string
 	data, err := rlp.EncodeToBytes(signedTx)
 	if err != nil {
 		return txHash, fmt.Errorf("Failed to RLP encode: %s", err)
 	}
-	err = w.RPC.CallContext(ctx, &txHash, "eth_sendRawTransaction", common.ToHex(data))
+	err = w.rpcCall(&txHash, "eth_sendRawTransaction", common.ToHex(data))
 	return txHash, err
 }
 
@@ -213,21 +258,15 @@ type txnReceipt struct {
 }
 
 // WaitUntilMined waits until a given transaction has been mined
-func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, error) {
+func (w *Worker) waitUntilMined(start time.Time, txHash string, retryDelay time.Duration) (*txnReceipt, error) {
 
 	var isMined = false
-
-	// After this initial sleep we wait up to a maximum time,
-	// checking periodically - 5 times up to the maximum
-	retryDelay := time.Duration(float64(w.Exerciser.ReceiptWaitMax-w.Exerciser.ReceiptWaitMin)/5) * time.Second
 
 	var receipt txnReceipt
 	for !isMined {
 		callStart := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 
-		err := w.RPC.CallContext(ctx, &receipt, "eth_getTransactionReceipt", common.HexToHash(txHash))
+		err := w.rpcCall(&receipt, "eth_getTransactionReceipt", common.HexToHash(txHash))
 		elapsed := time.Now().Sub(start)
 		callTime := time.Now().Sub(callStart)
 
@@ -237,11 +276,22 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string) (*txnReceipt, er
 			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
 		}
 		if receipt.Status != nil {
+			status := receipt.Status.ToInt()
+			w.incrCounter("tx.receipt")
+			if status.Uint64() == 1 {
+				w.incrCounter("tx.success")
+			} else {
+				w.incrCounter("tx.failexec")
+				w.incrCounter("tx.fail")
+			}
+
 			w.debug("Status=%s BlockNumber=%s BlockHash=%x TransactionIndex=%d GasUsed=%s CumulativeGasUsed=%s",
-				receipt.Status.ToInt(), receipt.BlockNumber.ToInt(), receipt.BlockHash,
+				status, receipt.BlockNumber.ToInt(), receipt.BlockHash,
 				receipt.TransactionIndex, receipt.GasUsed.ToInt(), receipt.CumulativeGasUsed.ToInt())
 		}
 		if !isMined && elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
+			w.incrCounter("tx.timeout")
+			w.incrCounter("tx.fail")
 			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs", elapsed.Seconds())
 		}
 		if !isMined {
@@ -259,27 +309,31 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*txnReceipt, error
 	if err != nil {
 		w.error("failed sending TX: %s", err)
 	} else {
-		w.Nonce++
 		// Wait for mining
 		start := time.Now()
 		w.debug("Waiting for %d seconds for tx be mined in next block", w.Exerciser.ReceiptWaitMin)
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
-		receipt, err = w.waitUntilMined(start, txHash)
+		receipt, err = w.waitUntilMined(start, txHash, 1*time.Second)
 		if err != nil {
 			return nil, fmt.Errorf("failed checking TX receipt: %s", err)
 		}
+		// Increase nonce only if we got a receipt.
+		// Known transaction processing will kick in to bump the nonce otherwise
+		w.Nonce++
 	}
 	return receipt, err
 }
 
 // initializeNonce get the initial nonce to use
-func (w *Worker) initializeNonce(address string) error {
-	var result hexutil.Uint64
+func (w *Worker) initializeNonce(address common.Address) error {
+	block := "latest"
 	if w.Exerciser.Nonce == -1 {
-		err := w.RPC.Call(&result, "eth_getTransactionCount", address, "latest")
+		var result hexutil.Uint64
+		err := w.RPC.Call(&result, "eth_getTransactionCount", address.Hex(), block)
 		if err != nil {
 			return fmt.Errorf("Failed to get transaction count '%s' for %s: %s", result, address, err)
 		}
+		w.debug("Received nonce=%d for %s at '%s' block", result, address.Hex(), block)
 		w.Nonce = uint64(result)
 	} else {
 		w.Nonce = uint64(w.Exerciser.Nonce)
@@ -287,22 +341,16 @@ func (w *Worker) initializeNonce(address string) error {
 	return nil
 }
 
-// GetNetworkID returns the network ID from the node
-func (w *Worker) GetNetworkID() (int64, error) {
-	var strNetworkID string
-	err := w.RPC.Call(&strNetworkID, "net_version")
-	if err != nil {
-		return 0, fmt.Errorf("Failed to query network ID (to use as chain ID in EIP155 signing): %s", err)
-	}
-	networkID, err := strconv.ParseInt(strNetworkID, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("Failed to parse network ID returned from node '%s': %s", strNetworkID, err)
-	}
-	return networkID, nil
-}
-
 // Init the account and connection for this worker
-func (w *Worker) Init() error {
+func (w *Worker) Init() (err error) {
+
+	// Store items we need for metrics naming
+	if w.Exerciser.StatsdServer != "" {
+		hostname, _ := os.Hostname()
+		w.servername = strings.Split(hostname, ".")[0]
+		w.pid = os.Getpid()
+		w.telegrafMetricsFormat = w.Exerciser.StatsdTelegraf
+	}
 
 	// Connect the client
 	rpc, err := rpc.Dial(w.Exerciser.URL)
@@ -314,20 +362,19 @@ func (w *Worker) Init() error {
 
 	// Generate or allocate an account from the exerciser
 	if w.Exerciser.ExternalSign {
-		if err := w.generateAccount(); err != nil {
-			return err
-		}
+		w.Account = ecrypto.PubkeyToAddress(w.PrivateKey.PublicKey)
+		w.Signer = types.NewEIP155Signer(big.NewInt(w.Exerciser.ChainID))
 	} else {
 		account := w.Exerciser.Accounts[w.Index]
 		if !common.IsHexAddress(account) {
 			return fmt.Errorf("Invalid account address (20 hex bytes with '0x' prefix): %s", account)
 		}
 		w.Account = common.HexToAddress(account)
+	}
 
-		// Get the initial nonce for this existing account
-		if err := w.initializeNonce(account); err != nil {
-			return err
-		}
+	// Get the initial nonce for this existing account
+	if err := w.initializeNonce(w.Account); err != nil {
+		return err
 	}
 
 	return nil
@@ -377,28 +424,52 @@ func (w *Worker) Run() {
 			}
 		}
 
+		// Find the difference between the last successful mining time, and the initial wait
+		// period. Aim for two retries per round, by roughly spliting the difference between
+		// the minimum time, and 1 second over the last mining time.
+		minSleep := time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second
+		if w.lastMiningTime < minSleep {
+			w.lastMiningTime = minSleep
+		}
+		retryDelay := (w.lastMiningTime - minSleep + 1*time.Second) / 2
+		if retryDelay < 1*time.Second {
+			retryDelay = 1 * time.Second
+		}
+		// Reset the lastMiningTime each time round the loop
+		w.lastMiningTime = 0
+
 		// Transactions will not be mined immediately.
 		// Wait for number of configurable number of seconds before attempting
 		// to check for the transaction receipt.
 		// ** This should be greater than the block period **
-		w.debug("Waiting for %d seconds for tx to be mined in next block", w.Exerciser.ReceiptWaitMin)
+		initialSleep := minSleep + retryDelay
+		w.debug("Waiting for %.2fs seconds then retrying every %.2fs", initialSleep.Seconds(), retryDelay.Seconds())
 		start := time.Now()
-		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
+		time.Sleep(minSleep)
 
 		// Wait for the receipts of all successfully set transctions
 		var loopSuccesses uint64
 		for _, txHash := range txHashes {
-			receipt, err := w.waitUntilMined(start, txHash)
+			receipt, err := w.waitUntilMined(start, txHash, retryDelay)
 			if err != nil {
 				w.error("TX:%s failed checking receipt: %s", txHash, err)
-			} else if receipt.Status.ToInt().Uint64() == 0 {
-				w.error("TX:%s failed. Status=%s", txHash, receipt.Status.ToInt())
-				// If gasUsed == gasProvided, then you ran out of gas
-				if receipt.GasUsed.ToInt().Uint64() == uint64(w.Exerciser.Gas) {
-					w.error("TX ran out of gas before completion.")
-				}
 			} else {
-				loopSuccesses++
+				// Store the mining time for the first successful transaction
+				if w.lastMiningTime == 0 {
+					w.lastMiningTime = time.Now().Sub(start)
+					w.emitTiming("tx.minetime", w.lastMiningTime)
+					w.debug("First TX for this loop iteration mined after %.2fs", w.lastMiningTime.Seconds())
+				}
+
+				if receipt.Status.ToInt().Uint64() == 0 {
+					w.error("TX:%s failed. Status=%s", txHash, receipt.Status.ToInt())
+					// If gasUsed == gasProvided, then you ran out of gas
+					if receipt.GasUsed.ToInt().Uint64() == uint64(w.Exerciser.Gas) {
+						w.error("TX ran out of gas before completion.")
+					}
+				} else {
+					loopSuccesses++
+				}
 			}
 		}
 		var loopFailures = uint64(w.Exerciser.TxnsPerLoop) - loopSuccesses

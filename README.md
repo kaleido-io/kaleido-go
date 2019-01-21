@@ -33,7 +33,7 @@ This code is distributed under the [Apache 2 license](LICENSE).
 ```
 Sample exerciser for Ethereum permissioned chains - from Kaleido
 
-sage:
+Usage:
   kaleido-go [flags]
 
 Flags:
@@ -50,9 +50,11 @@ Flags:
   -g, --gas int                  Gas limit on the transaction (default 1000000)
   -G, --gasprice int             Gas price
   -h, --help                     help for kaleido-go
+  -k, --keys string              JSON file to create/update with an array of private keys for extsign
   -l, --loops int                Loops to perform in each worker before exiting (0=infinite) (default 1)
   -m, --method string            Method name in the contract to invoke
-  -N, --nonce int                Nonce (transaction number) for next transaction
+  -M, --metrics string           statsd server to submit metrics to
+  -N, --nonce int                Nonce (transaction number) for the next transaction (default -1)
   -P, --privateFor stringArray   Private for (see EEA Client Spec V1)
   -p, --privateFrom string       Private from (see EEA Client Spec V1)
   -S, --seconds-max int          Time in seconds before timing out waiting for a txn receipt (default 20)
