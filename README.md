@@ -47,6 +47,7 @@ Flags:
   -E, --estimategas              Estimate the gas for the contract call, rather than sending a txn
   -e, --extsign                  Sign externally with generated private keys + accounts
   -f, --file string              Solidity smart contract source. Deployed if --contract not supplied
+  -F, --flush-period int         Flush period for statsd metrics (ms) (default 1000)
   -g, --gas int                  Gas limit on the transaction (default 1000000)
   -G, --gasprice int             Gas price
   -h, --help                     help for kaleido-go
@@ -57,8 +58,10 @@ Flags:
   -N, --nonce int                Nonce (transaction number) for the next transaction (default -1)
   -P, --privateFor stringArray   Private for (see EEA Client Spec V1)
   -p, --privateFrom string       Private from (see EEA Client Spec V1)
+  -R, --rpc-timeout int          Timeout in seconds for an individual RCP call (default 30)
   -S, --seconds-max int          Time in seconds before timing out waiting for a txn receipt (default 20)
   -s, --seconds-min int          Time in seconds to wait before checking for a txn receipt (default 11)
+  -T, --telegraf                 Telegraf/InfluxDB stats naming (default is Graphite)
   -t, --transactions int         Count of transactions submit on each worker loop (default 1)
   -u, --url string               JSON/RPC URL for Ethereum node: https://user:pass@xyz-rpc.kaleido.io
   -w, --workers int              Number of workers to run (default 1)
