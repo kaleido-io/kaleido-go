@@ -161,18 +161,22 @@ func (w *Worker) graphiteMetricsFormatter(stat string) string {
 }
 
 func (w *Worker) incrCounter(name string) {
-	if w.telegrafMetricsFormat {
-		w.Exerciser.metrics.Increment(w.telegrafMetricsFormatter(name))
-	} else {
-		w.Exerciser.metrics.Increment(w.graphiteMetricsFormatter(name))
+	if w.Exerciser.metrics != nil {
+		if w.telegrafMetricsFormat {
+			w.Exerciser.metrics.Increment(w.telegrafMetricsFormatter(name))
+		} else {
+			w.Exerciser.metrics.Increment(w.graphiteMetricsFormatter(name))
+		}
 	}
 }
 
 func (w *Worker) emitTiming(name string, timing time.Duration) {
-	if w.telegrafMetricsFormat {
-		w.Exerciser.metrics.Gauge(w.telegrafMetricsFormatter(name), int(timing.Nanoseconds()/1000000))
-	} else {
-		w.Exerciser.metrics.Gauge(w.graphiteMetricsFormatter(name), int(timing.Nanoseconds()/1000000))
+	if w.Exerciser.metrics != nil {
+		if w.telegrafMetricsFormat {
+			w.Exerciser.metrics.Gauge(w.telegrafMetricsFormatter(name), int(timing.Nanoseconds()/1000000))
+		} else {
+			w.Exerciser.metrics.Gauge(w.graphiteMetricsFormatter(name), int(timing.Nanoseconds()/1000000))
+		}
 	}
 }
 
