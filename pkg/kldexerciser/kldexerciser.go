@@ -50,6 +50,7 @@ type Exerciser struct {
 	StatsdServer      string
 	StatsdFlushPeriod int64
 	StatsdTelegraf    bool
+	StatsdQualifier   string
 	RPCTimeout        int
 	PrivateFrom       string
 	PrivateFor        []string

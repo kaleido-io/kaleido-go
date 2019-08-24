@@ -53,6 +53,7 @@ type Worker struct {
 	pid                   int
 	graphiteMetrics       bool
 	telegrafMetricsFormat bool
+	metricsQualifier      string
 	lastMiningTime        time.Duration
 }
 
@@ -152,12 +153,20 @@ func (w *Worker) sendUnsignedTxn(tx *types.Transaction) (string, error) {
 
 // Formatter for Telegraf/InfluxDB style statsd metrics formatting
 func (w *Worker) telegrafMetricsFormatter(stat string) string {
-	return fmt.Sprintf("%s,server=%s,pid=%d,worker=%d", stat, w.servername, w.pid, w.Index)
+	qual := ""
+	if w.metricsQualifier != "" {
+		qual = ",qual=" + w.metricsQualifier
+	}
+	return fmt.Sprintf("%s,server=%s,pid=%d,worker=%d%s", stat, w.servername, w.pid, w.Index, qual)
 }
 
 // Formatter for Graphite style statsd metrics formatting
 func (w *Worker) graphiteMetricsFormatter(stat string) string {
-	return fmt.Sprintf("%s.P%06d%s.%s", w.servername, w.pid, w.Name, stat)
+	qual := ""
+	if w.metricsQualifier != "" {
+		qual = w.metricsQualifier + "."
+	}
+	return fmt.Sprintf("%s%s.P%06d%s.%s", qual, w.servername, w.pid, w.Name, stat)
 }
 
 func (w *Worker) incrCounter(name string) {
@@ -354,6 +363,7 @@ func (w *Worker) Init() (err error) {
 		w.servername = strings.Split(hostname, ".")[0]
 		w.pid = os.Getpid()
 		w.telegrafMetricsFormat = w.Exerciser.StatsdTelegraf
+		w.metricsQualifier = w.Exerciser.StatsdQualifier
 	}
 
 	// Connect the client

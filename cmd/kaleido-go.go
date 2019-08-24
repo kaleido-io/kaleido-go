@@ -65,6 +65,7 @@ func init() {
 	cmd.Flags().StringVarP(&exerciser.StatsdServer, "metrics", "M", "", "statsd server to submit metrics to")
 	cmd.Flags().IntVarP(&exerciser.TxnsPerLoop, "transactions", "t", 1, "Count of transactions submit on each worker loop")
 	cmd.Flags().BoolVarP(&exerciser.StatsdTelegraf, "telegraf", "T", false, "Telegraf/InfluxDB stats naming (default is Graphite)")
+	cmd.Flags().StringVarP(&exerciser.StatsdQualifier, "metrics-qualifier", "q", "", "Additional metrics qualifier")
 	cmd.Flags().StringVarP(&exerciser.URL, "url", "u", "", "JSON/RPC URL for Ethereum node: https://user:pass@xyz-rpc.kaleido.io")
 	cmd.Flags().IntVarP(&exerciser.Workers, "workers", "w", 1, "Number of workers to run")
 	cmd.MarkFlagRequired("url")
