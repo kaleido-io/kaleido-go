@@ -53,6 +53,7 @@ type Exerciser struct {
 	RPCTimeout        int
 	PrivateFrom       string
 	PrivateFor        []string
+	PrivateEEA        bool
 	Loops             int
 	TxnsPerLoop       int
 	ReceiptWaitMin    int
@@ -179,7 +180,7 @@ func (e *Exerciser) Start() (err error) {
 	}
 	log.Info("Exercising method '", e.Method, "' in solidity contract ", e.SolidityFile)
 
-	if e.PrivateFrom != "" {
+	if len(e.PrivateFor) > 0 {
 		if e.ExternalSign {
 			return fmt.Errorf("External signing not currently supported with private transactions")
 		}

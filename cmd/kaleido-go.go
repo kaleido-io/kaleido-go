@@ -59,6 +59,7 @@ func init() {
 	cmd.Flags().StringVarP(&exerciser.Method, "method", "m", "", "Method name in the contract to invoke")
 	cmd.Flags().StringArrayVarP(&exerciser.PrivateFor, "privateFor", "P", []string{}, "Private for (see EEA Client Spec V1)")
 	cmd.Flags().StringVarP(&exerciser.PrivateFrom, "privateFrom", "p", "", "Private from (see EEA Client Spec V1)")
+	cmd.Flags().BoolVarP(&exerciser.PrivateEEA, "privateEEA", "V", false, "Private txns use EEA spec JSON/RPC commands")
 	cmd.Flags().IntVarP(&exerciser.RPCTimeout, "rpc-timeout", "R", 30, "Timeout in seconds for an individual RCP call")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMin, "seconds-min", "s", 11, "Time in seconds to wait before checking for a txn receipt")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMax, "seconds-max", "S", 20, "Time in seconds before timing out waiting for a txn receipt")

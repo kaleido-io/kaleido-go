@@ -124,6 +124,7 @@ type sendTxArgs struct {
 	// EEA spec extensions
 	PrivateFrom string   `json:"privateFrom,omitempty"`
 	PrivateFor  []string `json:"privateFor,omitempty"`
+	Restriction string   `json:"restriction,omitempty"`
 }
 
 // sendUnsignedTxn sends a transaction for internal signing by the node
@@ -137,16 +138,21 @@ func (w *Worker) sendUnsignedTxn(tx *types.Transaction) (string, error) {
 		Value:    hexutil.Big(*tx.Value()),
 		Data:     &data,
 	}
-	if w.Exerciser.PrivateFrom != "" {
+	rpcMethod := "eth_sendTransaction"
+	if len(w.Exerciser.PrivateFor) > 0 {
 		args.PrivateFrom = w.Exerciser.PrivateFrom
 		args.PrivateFor = w.Exerciser.PrivateFor
+		if w.Exerciser.PrivateEEA {
+			args.Restriction = "restricted"
+			rpcMethod = "eea_sendTransaction"
+		}
 	}
 	var to = tx.To()
 	if to != nil {
 		args.To = to.Hex()
 	}
 	var txHash string
-	err := w.rpcCall(&txHash, "eth_sendTransaction", args)
+	err := w.rpcCall(&txHash, rpcMethod, args)
 	return txHash, err
 }
 
@@ -330,14 +336,22 @@ func (w *Worker) sendAndWaitForMining(tx *types.Transaction) (*txnReceipt, error
 
 // initializeNonce get the initial nonce to use
 func (w *Worker) initializeNonce(address common.Address) error {
-	block := "latest"
+	var blockOrPrivacyGroup string
 	if w.Exerciser.Nonce == -1 {
 		var result hexutil.Uint64
-		err := w.RPC.Call(&result, "eth_getTransactionCount", address.Hex(), block)
+		blockOrPrivacyGroup = "latest"
+		rpcMethod := "eth_getTransactionCount"
+		if len(w.Exerciser.PrivateFor) > 0 && w.Exerciser.PrivateEEA {
+			if err := w.RPC.Call(&result, "priv_findPrivacyGroup", w.Exerciser.PrivateFor); err != nil {
+				return err
+			}
+			rpcMethod = "priv_getTransactionCount"
+		}
+		err := w.RPC.Call(&result, rpcMethod, address.Hex(), blockOrPrivacyGroup)
 		if err != nil {
 			return fmt.Errorf("Failed to get transaction count '%s' for %s: %s", result, address, err)
 		}
-		w.debug("Received nonce=%d for %s at '%s' block", result, address.Hex(), block)
+		w.debug("Received nonce=%d for %s at '%s' block", result, address.Hex(), blockOrPrivacyGroup)
 		w.Nonce = uint64(result)
 	} else {
 		w.Nonce = uint64(w.Exerciser.Nonce)
