@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os/exec"
 	"reflect"
 	"strings"
 
@@ -80,13 +81,35 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]inte
 }
 
 // CompileContract uses solc to compile the Solidity source and
-func CompileContract(solidityFile, contractName string, method string, args []string) (*CompiledSolidity, error) {
+func CompileContract(solidityFile, evmVersion, contractName, method string, args []string) (*CompiledSolidity, error) {
 	var c CompiledSolidity
 
-	// Compile the solidity
-	compiled, err := compiler.CompileSolidity("solc", solidityFile)
+	solcVer, err := compiler.SolidityVersion("solc")
 	if err != nil {
-		return nil, fmt.Errorf("Solidity compilation failed: %s", err)
+		return nil, fmt.Errorf("Failed to find solidity version: %s", err)
+	}
+	solcArgs := []string{
+		"--combined-json", "bin,bin-runtime,srcmap,srcmap-runtime,abi,userdoc,devdoc,metadata",
+		"--optimize",
+		"--evm-version", evmVersion,
+		"--allow-paths", ".",
+		solidityFile,
+	}
+	solOptionsString := strings.Join(append([]string{solcVer.Path}, solcArgs...), " ")
+	log.Debugf("Compiling: %s", solOptionsString)
+	cmd := exec.Command(solcVer.Path, solcArgs...)
+
+	// Compile the solidity
+	var stderr, stdout bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("Failed to compile [%s]: %s", err, stderr.String())
+	}
+
+	compiled, err := compiler.ParseCombinedJSON(stdout.Bytes(), "", solcVer.Version, solcVer.Version, solOptionsString)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to parse solc output: %s", err)
 	}
 
 	// Check we only have one conract and grab the code/info
