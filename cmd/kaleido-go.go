@@ -51,6 +51,7 @@ func init() {
 	cmd.Flags().BoolVarP(&exerciser.ExternalSign, "extsign", "e", false, "Sign externally with generated private keys + accounts")
 	cmd.Flags().StringVarP(&exerciser.ExternalSignJSON, "keys", "k", "", "JSON file to create/update with an array of private keys for extsign")
 	cmd.Flags().BoolVarP(&exerciser.EstimateGas, "estimategas", "E", false, "Estimate the gas for the contract call, rather than sending a txn")
+	cmd.Flags().StringVarP(&exerciser.EVMVersion, "evm-version", "V", "byzantium", "EVM version to compile for (byzantium etc.)")
 	cmd.Flags().StringVarP(&exerciser.SolidityFile, "file", "f", "", "Solidity smart contract source. Deployed if --contract not supplied")
 	cmd.Flags().Int64VarP(&exerciser.StatsdFlushPeriod, "flush-period", "F", 1000, "Flush period for statsd metrics (ms)")
 	cmd.Flags().Int64VarP(&exerciser.Gas, "gas", "g", 1000000, "Gas limit on the transaction")

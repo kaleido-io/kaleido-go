@@ -45,6 +45,7 @@ type Exerciser struct {
 	SolidityFile      string
 	ABI               string
 	Amount            int64
+	EVMVersion        string
 	GasPrice          int64
 	Gas               int64
 	StatsdServer      string
@@ -174,7 +175,7 @@ func (e *Exerciser) Start() (err error) {
 	}
 
 	log.Debug("Compiling solidity file ", e.SolidityFile)
-	compiled, err := CompileContract(e.SolidityFile, e.ContractName, e.Method, e.Args)
+	compiled, err := CompileContract(e.SolidityFile, e.EVMVersion, e.ContractName, e.Method, e.Args)
 	if err != nil {
 		return err
 	}
