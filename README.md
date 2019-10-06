@@ -6,7 +6,7 @@ Built as a sample and exerciser for the [kaleido.io](https://kaleido.io) platfor
 and compatible with other Ethereum chains.
 
 Tested with [go-ethereum](https://github.com/ethereum/go-ethereum/) and
-[Quorum](https://github.com/jpmorganchase/quorum) permissioned chains.
+[Quorum](https://github.com/jpmorganchase/quorum) and [Hyperledger Besu](https://www.hyperledger.org/projects/besu) permissioned chains.
 
 The exerciser uses the go-ethererum JSON/RPC client to provide a simple command-line
 interface and code samples for:
