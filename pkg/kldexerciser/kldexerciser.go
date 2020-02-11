@@ -236,7 +236,7 @@ func (e *Exerciser) Start() (err error) {
 	}
 	log.Info("Contract address=", e.To.Hex())
 
-	if e.Call || e.EstimateGas {
+	if e.EstimateGas {
 		log.Debug("Calling contract")
 		if err := workers[0].CallOnce(); err != nil {
 			return err
@@ -248,7 +248,11 @@ func (e *Exerciser) Start() (err error) {
 			worker := &workers[i]
 			wg.Add(1)
 			go func(worker *Worker) {
-				worker.Run()
+				if e.Call {
+					worker.CallMultiple()
+				} else {
+					worker.Run()
+				}
 				wg.Done()
 			}(worker)
 		}

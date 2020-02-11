@@ -61,7 +61,7 @@ func init() {
 	cmd.Flags().StringArrayVarP(&exerciser.PrivateFor, "privateFor", "P", []string{}, "Private for (see EEA Client Spec V1)")
 	cmd.Flags().StringVarP(&exerciser.PrivateFrom, "privateFrom", "p", "", "Private from (see EEA Client Spec V1)")
 	cmd.Flags().IntVarP(&exerciser.RPCTimeout, "rpc-timeout", "R", 30, "Timeout in seconds for an individual RCP call")
-	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMin, "seconds-min", "s", 11, "Time in seconds to wait before checking for a txn receipt")
+	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMin, "seconds-min", "s", 11, "Time in seconds to wait before checking for a txn receipt/before making subsequent contract call")
 	cmd.Flags().IntVarP(&exerciser.ReceiptWaitMax, "seconds-max", "S", 20, "Time in seconds before timing out waiting for a txn receipt")
 	cmd.Flags().StringVarP(&exerciser.StatsdServer, "metrics", "M", "", "statsd server to submit metrics to")
 	cmd.Flags().IntVarP(&exerciser.TxnsPerLoop, "transactions", "t", 1, "Count of transactions submit on each worker loop")
