@@ -417,6 +417,17 @@ func (w *Worker) CallOnce() error {
 	return err
 }
 
+// CallMultiple executes a contract based on loop inputs
+func (w *Worker) CallMultiple() {
+	infinite := (w.Exerciser.Loops == 0)
+	for ; w.LoopIndex < uint64(w.Exerciser.Loops) || infinite; w.LoopIndex++ {
+
+		tx := w.generateTransaction()
+		_ = w.callContract(tx)
+		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
+	}
+}
+
 // Run executes the specified exerciser workload then exits
 func (w *Worker) Run() {
 	log.Debug(w.Name, ": started. ", w.Exerciser.TxnsPerLoop, " tx/loop for ", w.Exerciser.Loops, " loops. Account=", w.Account.Hex())

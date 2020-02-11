@@ -129,6 +129,20 @@ INFO[2018-05-14T23:01:26-04:00] Contract address=0x2C13d6D15975EfbF7DfD2bFdaFe74
 INFO[2018-05-14T23:01:26-04:00] W0000/L0000/N000129: Call result: '0x0000000000000000000000000000000000000000000000000000000000003039' [0.04s]
 ```
 
+# Call the deployed contract to get the value in loop
+
+Run 10 contract calls with 1 second delay between each call
+
+Shell command (linux/mac):
+
+```sh
+./kaleido-go -f examples/simplestorage.sol \
+  -m get -C -c 0x2C13d6D15975EfbF7DfD2bFdaFe7413e391eFc65 \
+  -u "$NODE_URL" -a "$ACCOUNT"
+  -l 10 -s 1
+```
+
+
 # Send 10 private transactions with debug and custom wait times
 
 > Private transactions can only currently be signed on the node
