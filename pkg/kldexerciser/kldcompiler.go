@@ -19,9 +19,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"os/exec"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -33,11 +36,13 @@ import (
 type CompiledSolidity struct {
 	Compiled     string
 	ContractInfo compiler.ContractInfo
-	PackedCall   []byte
+	method       string
+	abi          abi.ABI
+	args         []string
 }
 
 // GenerateTypedArgs parses string arguments into a range of types to pass to the ABI call
-func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]interface{}, error) {
+func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string, batch, batchSize, index int) ([]interface{}, error) {
 
 	method, exist := abi.Methods[methodName]
 	if !exist {
@@ -56,6 +61,17 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]inte
 			typedArgs = append(typedArgs, strval)
 			break
 		case "int256", "uint256":
+			if strings.Contains(strval, "RANGE:") {
+				start := strings.TrimPrefix(strval, "RANGE:")
+				rand.Seed(time.Now().UnixNano())
+				min, err := strconv.Atoi(start)
+				if err != nil {
+					fmt.Printf("Failed to parse start of the RANGE: %s\n", strval)
+					return nil, fmt.Errorf("Failed to parse start of the RANGE: %s. %s\n", strval, err)
+				}
+				strval = strconv.Itoa(min + batch*batchSize + index)
+				fmt.Printf("Calculated RANGE index for worker %d: %s\n", index, strval)
+			}
 			bigInt := big.NewInt(0)
 			if _, ok := bigInt.SetString(strval, 10); !ok {
 				return nil, fmt.Errorf("Could not convert '%s' to %s", strval, inputArg.Type)
@@ -128,6 +144,8 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	}
 	c.ContractInfo = contract.Info
 	c.Compiled = contract.Code
+	c.method = method
+	c.args = args
 
 	// Pack the arguments for calling the contract
 	abiJSON, err := json.Marshal(contract.Info.AbiDefinition)
@@ -138,15 +156,20 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	if err != nil {
 		return nil, fmt.Errorf("Parsing ABI: %s", err)
 	}
-	typedArgs, err := GenerateTypedArgs(abi, method, args)
+
+	c.abi = abi
+
+	return &c, nil
+}
+
+func (c *CompiledSolidity) PackCall(batch, batchSize, index int) ([]byte, error) {
+	typedArgs, err := GenerateTypedArgs(c.abi, c.method, c.args, batch, batchSize, index)
 	if err != nil {
 		return nil, err
 	}
-	packedCall, err := abi.Pack(method, typedArgs...)
+	packedCall, err := c.abi.Pack(c.method, typedArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("Packing arguments %s for call %s: %s", args, method, err)
+		return nil, fmt.Errorf("Packing arguments %s for call %s: %s", c.args, c.method, err)
 	}
-	c.PackedCall = packedCall
-
-	return &c, nil
+	return packedCall, nil
 }

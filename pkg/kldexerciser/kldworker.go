@@ -70,14 +70,19 @@ func (w Worker) error(message string, inserts ...interface{}) {
 }
 
 // generateTransaction creates a new transaction for the specified data
-func (w *Worker) generateTransaction() *types.Transaction {
+func (w *Worker) generateTransaction(indexInLoop int) *types.Transaction {
+	packedCall, err := w.CompiledContract.PackCall(int(w.LoopIndex), w.Exerciser.TxnsPerLoop, indexInLoop)
+	if err != nil {
+		log.Error(fmt.Sprintf("Failed to generate transaction. %s", err))
+		return nil
+	}
 	tx := types.NewTransaction(
 		w.Nonce,
 		*w.Exerciser.To,
 		big.NewInt(w.Exerciser.Amount),
 		uint64(w.Exerciser.Gas),
 		big.NewInt(w.Exerciser.GasPrice),
-		w.CompiledContract.PackedCall)
+		packedCall)
 	w.debug("TX:%s To=%s Amount=%d Gas=%d GasPrice=%d",
 		tx.Hash().Hex(), tx.To().Hex(), w.Exerciser.Amount, w.Exerciser.Gas, w.Exerciser.GasPrice)
 	return tx
@@ -253,7 +258,7 @@ func (w *Worker) signAndSendTxn(tx *types.Transaction) (string, error) {
 	if err != nil {
 		return txHash, fmt.Errorf("Failed to RLP encode: %s", err)
 	}
-	err = w.rpcCall(&txHash, "eth_sendRawTransaction", common.ToHex(data))
+	err = w.rpcCall(&txHash, "eth_sendRawTransaction", hexutil.Encode(data))
 	return txHash, err
 }
 
@@ -412,7 +417,7 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 
 // CallOnce executes a contract once and returns
 func (w *Worker) CallOnce() error {
-	tx := w.generateTransaction()
+	tx := w.generateTransaction(0)
 	err := w.callContract(tx)
 	return err
 }
@@ -422,7 +427,7 @@ func (w *Worker) CallMultiple() {
 	infinite := (w.Exerciser.Loops == 0)
 	for ; w.LoopIndex < uint64(w.Exerciser.Loops) || infinite; w.LoopIndex++ {
 
-		tx := w.generateTransaction()
+		tx := w.generateTransaction(0)
 		_ = w.callContract(tx)
 		time.Sleep(time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second)
 	}
@@ -439,7 +444,7 @@ func (w *Worker) Run() {
 		// Send a set of transactions before waiting for receipts (which takes some time)
 		var txHashes []string
 		for i := 0; i < w.Exerciser.TxnsPerLoop; i++ {
-			tx := w.generateTransaction()
+			tx := w.generateTransaction(i)
 			txHash, err := w.sendTransaction(tx)
 			if err != nil {
 				w.error("TX send failed (%d/%d): %s", i, w.Exerciser.TxnsPerLoop, err)
