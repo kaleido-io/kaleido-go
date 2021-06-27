@@ -71,7 +71,7 @@ func (w Worker) error(message string, inserts ...interface{}) {
 
 // generateTransaction creates a new transaction for the specified data
 func (w *Worker) generateTransaction(indexInLoop int) *types.Transaction {
-	packedCall, err := w.CompiledContract.PackCall(int(w.LoopIndex), w.Exerciser.TxnsPerLoop, indexInLoop)
+	packedCall, err := w.CompiledContract.PackCall(w.Exerciser.Loops, int(w.LoopIndex), w.Exerciser.TxnsPerLoop, indexInLoop, w.Index)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed to generate transaction. %s", err))
 		return nil

@@ -42,7 +42,7 @@ type CompiledSolidity struct {
 }
 
 // GenerateTypedArgs parses string arguments into a range of types to pass to the ABI call
-func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string, batch, batchSize, index int) ([]interface{}, error) {
+func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string, totalBatches, batch, batchSize, index, workerIndex int) ([]interface{}, error) {
 
 	method, exist := abi.Methods[methodName]
 	if !exist {
@@ -69,8 +69,8 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string, batch, 
 					fmt.Printf("Failed to parse start of the RANGE: %s\n", strval)
 					return nil, fmt.Errorf("Failed to parse start of the RANGE: %s. %s\n", strval, err)
 				}
-				strval = strconv.Itoa(min + batch*batchSize + index)
-				fmt.Printf("Calculated RANGE index for worker %d: %s\n", index, strval)
+				strval = strconv.Itoa(min + workerIndex*totalBatches*batchSize + batch*batchSize + index)
+				fmt.Printf("Calculated RANGE index for worker %d patch %d index %d: %s\n", workerIndex, batch, index, strval)
 			}
 			bigInt := big.NewInt(0)
 			if _, ok := bigInt.SetString(strval, 10); !ok {
@@ -162,8 +162,8 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	return &c, nil
 }
 
-func (c *CompiledSolidity) PackCall(batch, batchSize, index int) ([]byte, error) {
-	typedArgs, err := GenerateTypedArgs(c.abi, c.method, c.args, batch, batchSize, index)
+func (c *CompiledSolidity) PackCall(totalBatches, batch, batchSize, index, workerIndex int) ([]byte, error) {
+	typedArgs, err := GenerateTypedArgs(c.abi, c.method, c.args, totalBatches, batch, batchSize, index, workerIndex)
 	if err != nil {
 		return nil, err
 	}
