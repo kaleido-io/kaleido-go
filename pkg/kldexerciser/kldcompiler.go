@@ -41,38 +41,34 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]inte
 
 	method, exist := abi.Methods[methodName]
 	if !exist {
-		return nil, fmt.Errorf("Method '%s' not found", methodName)
+		return nil, fmt.Errorf("method '%s' not found", methodName)
 	}
 
 	log.Debug("Parsing args for method: ", method)
 	var typedArgs []interface{}
 	for idx, inputArg := range method.Inputs {
 		if idx >= len(strargs) {
-			return nil, fmt.Errorf("Method requires %d args: %s", len(method.Inputs), method)
+			return nil, fmt.Errorf("method requires %d args: %s", len(method.Inputs), method)
 		}
 		strval := strargs[idx]
 		switch inputArg.Type.String() {
 		case "string":
 			typedArgs = append(typedArgs, strval)
-			break
 		case "int256", "uint256":
 			bigInt := big.NewInt(0)
 			if _, ok := bigInt.SetString(strval, 10); !ok {
-				return nil, fmt.Errorf("Could not convert '%s' to %s", strval, inputArg.Type)
+				return nil, fmt.Errorf("could not convert '%s' to %s", strval, inputArg.Type)
 			}
 			typedArgs = append(typedArgs, bigInt)
-			break
 		case "bool":
 			typedArgs = append(typedArgs, strings.ToLower(strval) == "true")
-			break
 		case "address":
 			if !common.IsHexAddress(strval) {
-				return nil, fmt.Errorf("Invalid hex address for arg %d: %s", idx, strval)
+				return nil, fmt.Errorf("invalid hex address for arg %d: %s", idx, strval)
 			}
 			typedArgs = append(typedArgs, common.HexToAddress(strval))
-			break
 		default:
-			return nil, fmt.Errorf("No string parsing configured yet for type %s", inputArg.Type)
+			return nil, fmt.Errorf("no string parsing configured yet for type %s", inputArg.Type)
 		}
 	}
 
@@ -86,7 +82,7 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 
 	solcVer, err := compiler.SolidityVersion("solc")
 	if err != nil {
-		return nil, fmt.Errorf("Failed to find solidity version: %s", err)
+		return nil, fmt.Errorf("failed to find solidity version: %s", err)
 	}
 	solcArgs := []string{
 		"--combined-json", "bin,bin-runtime,srcmap,srcmap-runtime,abi,userdoc,devdoc,metadata",
@@ -104,12 +100,12 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	cmd.Stderr = &stderr
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("Failed to compile [%s]: %s", err, stderr.String())
+		return nil, fmt.Errorf("failed to compile [%s]: %s", err, stderr.String())
 	}
 
 	compiled, err := compiler.ParseCombinedJSON(stdout.Bytes(), "", solcVer.Version, solcVer.Version, solOptionsString)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to parse solc output: %s", err)
+		return nil, fmt.Errorf("failed to parse solc output: %s", err)
 	}
 
 	// Check we only have one conract and grab the code/info
@@ -117,11 +113,11 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	contractNames := reflect.ValueOf(compiled).MapKeys()
 	if contractName != "" {
 		if _, ok := compiled[contractName]; !ok {
-			return nil, fmt.Errorf("Contract %s not found in Solidity file: %s", contractName, contractNames)
+			return nil, fmt.Errorf("contract %s not found in Solidity file: %s", contractName, contractNames)
 		}
 		contract = compiled[contractName]
 	} else if len(contractNames) != 1 {
-		return nil, fmt.Errorf("More than one contract in Solidity file, please set one to call: %s", contractNames)
+		return nil, fmt.Errorf("more than one contract in Solidity file, please set one to call: %s", contractNames)
 	} else {
 		contractName = contractNames[0].String()
 		contract = compiled[contractName]
@@ -132,11 +128,11 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	// Pack the arguments for calling the contract
 	abiJSON, err := json.Marshal(contract.Info.AbiDefinition)
 	if err != nil {
-		return nil, fmt.Errorf("Serializing ABI: %s", err)
+		return nil, fmt.Errorf("serializing ABI: %s", err)
 	}
 	abi, err := abi.JSON(bytes.NewReader(abiJSON))
 	if err != nil {
-		return nil, fmt.Errorf("Parsing ABI: %s", err)
+		return nil, fmt.Errorf("parsing ABI: %s", err)
 	}
 	typedArgs, err := GenerateTypedArgs(abi, method, args)
 	if err != nil {
@@ -144,7 +140,7 @@ func CompileContract(solidityFile, evmVersion, contractName, method string, args
 	}
 	packedCall, err := abi.Pack(method, typedArgs...)
 	if err != nil {
-		return nil, fmt.Errorf("Packing arguments %s for call %s: %s", args, method, err)
+		return nil, fmt.Errorf("packing arguments %s for call %s: %s", args, method, err)
 	}
 	c.PackedCall = packedCall
 

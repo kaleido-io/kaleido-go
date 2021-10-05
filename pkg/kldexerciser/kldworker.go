@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/avast/retry-go"
 	hexutil "github.com/ethereum/go-ethereum/common/hexutil"
 
 	"github.com/ethereum/go-ethereum"
@@ -51,7 +53,6 @@ type Worker struct {
 	Signer                types.EIP155Signer
 	servername            string
 	pid                   int
-	graphiteMetrics       bool
 	telegrafMetricsFormat bool
 	metricsQualifier      string
 	lastMiningTime        time.Duration
@@ -94,7 +95,7 @@ func (w *Worker) sendTransaction(tx *types.Transaction) (string, error) {
 	} else {
 		txHash, err = w.sendUnsignedTxn(tx)
 	}
-	callTime := time.Now().Sub(start)
+	callTime := time.Since(start)
 	ok := (err == nil)
 
 	w.incrCounter("tx.sub")
@@ -193,13 +194,27 @@ func (w *Worker) rpcCall(result interface{}, method string, args ...interface{})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(w.Exerciser.RPCTimeout)*time.Second)
 	defer cancel()
 
-	w.incrCounter("rpc.calls")
-	err := w.RPC.CallContext(ctx, result, method, args...)
-	if err == nil {
-		w.incrCounter("rpc.success")
-	} else {
-		w.incrCounter("rpc.fail")
-	}
+	err := retry.Do(
+		func() error {
+			log.Debugf("Invoking %s", method)
+			w.incrCounter("rpc.calls")
+			err := w.RPC.CallContext(ctx, result, method, args...)
+			if err == nil {
+				w.incrCounter("rpc.success")
+			} else {
+				w.incrCounter("rpc.fail")
+			}
+			return err
+		},
+		retry.RetryIf(func(err error) bool {
+			return strings.Contains(err.Error(), "429")
+		}),
+		retry.Attempts(10),
+		retry.DelayType(func(n uint, err error, config *retry.Config) time.Duration {
+			log.Debugf("%s attempt %d failed: %s", method, n, err)
+			return retry.BackOffDelay(n, err, config)
+		}),
+	)
 	return err
 }
 
@@ -222,16 +237,16 @@ func (w *Worker) callContract(tx *types.Transaction) (err error) {
 	if w.Exerciser.EstimateGas {
 		var retValue hexutil.Uint64
 		err = w.rpcCall(&retValue, "eth_estimateGas", args)
-		callTime := time.Now().Sub(start)
-		w.info("Estimate Gas result: %d [%.2fs]", retValue, callTime.Seconds())
+		callTime := time.Since(start)
+		w.info("estimate Gas result: %d [%.2fs]", retValue, callTime.Seconds())
 	} else {
 		var retValue string
 		err = w.rpcCall(&retValue, "eth_call", args, "latest")
-		callTime := time.Now().Sub(start)
-		w.info("Call result: '%s' [%.2fs]", retValue, callTime.Seconds())
+		callTime := time.Since(start)
+		w.info("call result: '%s' [%.2fs]", retValue, callTime.Seconds())
 	}
 	if err != nil {
-		return fmt.Errorf("Contract call failed: %s", err)
+		return fmt.Errorf("contract call failed: %s", err)
 	}
 
 	return
@@ -251,9 +266,9 @@ func (w *Worker) signAndSendTxn(tx *types.Transaction) (string, error) {
 	var txHash string
 	data, err := rlp.EncodeToBytes(signedTx)
 	if err != nil {
-		return txHash, fmt.Errorf("Failed to RLP encode: %s", err)
+		return txHash, fmt.Errorf("failed to RLP encode: %s", err)
 	}
-	err = w.rpcCall(&txHash, "eth_sendRawTransaction", common.ToHex(data))
+	err = w.rpcCall(&txHash, "eth_sendRawTransaction", "0x"+hex.EncodeToString(data))
 	return txHash, err
 }
 
@@ -280,13 +295,13 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string, retryDelay time.
 		callStart := time.Now()
 
 		err := w.rpcCall(&receipt, "eth_getTransactionReceipt", common.HexToHash(txHash))
-		elapsed := time.Now().Sub(start)
-		callTime := time.Now().Sub(callStart)
+		elapsed := time.Since(start)
+		callTime := time.Since(callStart)
 
 		isMined = receipt.BlockNumber != nil && receipt.BlockNumber.ToInt().Uint64() > 0
 		w.info("TX:%s Mined=%t after %.2fs [%.2fs]", txHash, isMined, elapsed.Seconds(), callTime.Seconds())
 		if err != nil && err != ethereum.NotFound {
-			return nil, fmt.Errorf("Requesting TX receipt: %s", err)
+			return nil, fmt.Errorf("requesting TX receipt: %s", err)
 		}
 		if receipt.Status != nil {
 			status := receipt.Status.ToInt()
@@ -305,7 +320,7 @@ func (w *Worker) waitUntilMined(start time.Time, txHash string, retryDelay time.
 		if !isMined && elapsed > time.Duration(w.Exerciser.ReceiptWaitMax)*time.Second {
 			w.incrCounter("tx.timeout")
 			w.incrCounter("tx.fail")
-			return nil, fmt.Errorf("Timed out waiting for TX receipt after %.2fs", elapsed.Seconds())
+			return nil, fmt.Errorf("timed out waiting for TX receipt after %.2fs", elapsed.Seconds())
 		}
 		if !isMined {
 			time.Sleep(retryDelay)
@@ -344,7 +359,7 @@ func (w *Worker) initializeNonce(address common.Address) error {
 		var result hexutil.Uint64
 		err := w.RPC.Call(&result, "eth_getTransactionCount", address.Hex(), block)
 		if err != nil {
-			return fmt.Errorf("Failed to get transaction count '%s' for %s: %s", result, address, err)
+			return fmt.Errorf("failed to get transaction count '%s' for %s: %s", result, address, err)
 		}
 		w.debug("Received nonce=%d for %s at '%s' block", result, address.Hex(), block)
 		w.Nonce = uint64(result)
@@ -355,7 +370,8 @@ func (w *Worker) initializeNonce(address common.Address) error {
 }
 
 // Init the account and connection for this worker
-func (w *Worker) Init() (err error) {
+func (w *Worker) Init(rpc *rpc.Client) (err error) {
+	w.RPC = rpc
 
 	// Store items we need for metrics naming
 	if w.Exerciser.StatsdServer != "" {
@@ -366,14 +382,6 @@ func (w *Worker) Init() (err error) {
 		w.metricsQualifier = w.Exerciser.StatsdQualifier
 	}
 
-	// Connect the client
-	rpc, err := rpc.Dial(w.Exerciser.URL)
-	if err != nil {
-		return fmt.Errorf("Connect to %s failed: %s", w.Exerciser.URL, err)
-	}
-	w.RPC = rpc
-	log.Debug(w.Name, ": connected. URL=", w.Exerciser.URL)
-
 	// Generate or allocate an account from the exerciser
 	if w.Exerciser.ExternalSign {
 		w.Account = ecrypto.PubkeyToAddress(w.PrivateKey.PublicKey)
@@ -381,7 +389,7 @@ func (w *Worker) Init() (err error) {
 	} else {
 		account := w.Exerciser.Accounts[w.Index]
 		if !common.IsHexAddress(account) {
-			return fmt.Errorf("Invalid account address (20 hex bytes with '0x' prefix): %s", account)
+			return fmt.Errorf("invalid account address (20 hex bytes with '0x' prefix): %s", account)
 		}
 		w.Account = common.HexToAddress(account)
 	}
@@ -405,7 +413,7 @@ func (w *Worker) InstallContract() (*common.Address, error) {
 	)
 	receipt, err := w.sendAndWaitForMining(tx)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to install contract: %s", err)
+		return nil, fmt.Errorf("failed to install contract: %s", err)
 	}
 	return receipt.ContractAddress, nil
 }
@@ -481,7 +489,7 @@ func (w *Worker) Run() {
 			} else {
 				// Store the mining time for the first successful transaction
 				if w.lastMiningTime == 0 {
-					w.lastMiningTime = time.Now().Sub(start)
+					w.lastMiningTime = time.Since(start)
 					w.emitTiming("tx.minetime", w.lastMiningTime)
 					w.debug("First TX for this loop iteration mined after %.2fs", w.lastMiningTime.Seconds())
 				}

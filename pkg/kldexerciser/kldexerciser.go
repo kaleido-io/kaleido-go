@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -88,13 +89,15 @@ func (e *Exerciser) ensurePrivateKeys() (keys []*ecdsa.PrivateKey, err error) {
 		if err != nil {
 			log.Infof("File %s does not exist, it will be created (%s)", e.ExternalSignJSON, err)
 		} else if err = json.Unmarshal(jsonData, &serializedKeys); err != nil {
-			return nil, fmt.Errorf("Unable to parse %s: %s", e.ExternalSignJSON, err)
+			return nil, fmt.Errorf("unable to parse %s: %s", e.ExternalSignJSON, err)
+		} else {
+			log.Infof("Externally signing using private keys in %s", e.ExternalSignJSON)
 		}
 		preGenerated = len(serializedKeys)
 		keys = make([]*ecdsa.PrivateKey, max(preGenerated, e.Workers))
 		for i := 0; i < preGenerated; i++ {
 			if keys[i], err = ecrypto.HexToECDSA(serializedKeys[i]); err != nil {
-				return nil, fmt.Errorf("Unable to convert hex string %d in %s to ECDSA curve: %s", i, e.ExternalSignJSON, err)
+				return nil, fmt.Errorf("unable to convert hex string %d in %s to ECDSA curve: %s", i, e.ExternalSignJSON, err)
 			}
 		}
 	} else {
@@ -117,7 +120,7 @@ func (e *Exerciser) ensurePrivateKeys() (keys []*ecdsa.PrivateKey, err error) {
 		jsonBytes, _ := json.MarshalIndent(serializedKeys, "", "")
 		err := ioutil.WriteFile(e.ExternalSignJSON, jsonBytes, 0777)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to write %s: %s", e.ExternalSignJSON, err)
+			return nil, fmt.Errorf("unable to write %s: %s", e.ExternalSignJSON, err)
 		}
 	}
 
@@ -128,7 +131,7 @@ func (e *Exerciser) ensurePrivateKeys() (keys []*ecdsa.PrivateKey, err error) {
 func (e *Exerciser) generateAccount() (*ecdsa.PrivateKey, error) {
 	key, err := ecrypto.GenerateKey()
 	if err != nil {
-		return nil, fmt.Errorf("Generating key: %s", err)
+		return nil, fmt.Errorf("generating key: %s", err)
 	}
 	return key, nil
 }
@@ -137,17 +140,17 @@ func (e *Exerciser) generateAccount() (*ecdsa.PrivateKey, error) {
 func (e *Exerciser) GetNetworkID() (int64, error) {
 	rpc, err := rpc.Dial(e.URL)
 	if err != nil {
-		return 0, fmt.Errorf("Connect to %s failed: %s", e.URL, err)
+		return 0, fmt.Errorf("connect to %s failed: %s", e.URL, err)
 	}
 	defer rpc.Close()
 	var strNetworkID string
 	err = rpc.Call(&strNetworkID, "net_version")
 	if err != nil {
-		return 0, fmt.Errorf("Failed to query network ID (to use as chain ID in EIP155 signing): %s", err)
+		return 0, fmt.Errorf("failed to query network ID (to use as chain ID in EIP155 signing): %s", err)
 	}
 	networkID, err := strconv.ParseInt(strNetworkID, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("Failed to parse network ID returned from node '%s': %s", strNetworkID, err)
+		return 0, fmt.Errorf("failed to parse network ID returned from node '%s': %s", strNetworkID, err)
 	}
 	return networkID, nil
 }
@@ -156,7 +159,7 @@ func (e *Exerciser) GetNetworkID() (int64, error) {
 func (e *Exerciser) Start() (err error) {
 
 	if !e.ExternalSign && len(e.Accounts) < e.Workers {
-		return fmt.Errorf("Need accounts for each of %d workers (%d supplied)", e.Workers, len(e.Accounts))
+		return fmt.Errorf("need accounts for each of %d workers (%d supplied)", e.Workers, len(e.Accounts))
 	}
 
 	var keys []*ecdsa.PrivateKey
@@ -170,7 +173,7 @@ func (e *Exerciser) Start() (err error) {
 		if e.metrics, err = statsd.New(
 			statsd.Address(e.StatsdServer),
 			statsd.FlushPeriod(time.Duration(e.StatsdFlushPeriod)*time.Millisecond)); err != nil {
-			return fmt.Errorf("Failed to create metrics sink to statsd %s: %s", e.StatsdServer, err)
+			return fmt.Errorf("failed to create metrics sink to statsd %s: %s", e.StatsdServer, err)
 		}
 	}
 
@@ -183,7 +186,7 @@ func (e *Exerciser) Start() (err error) {
 
 	if e.PrivateFrom != "" {
 		if e.ExternalSign {
-			return fmt.Errorf("External signing not currently supported with private transactions")
+			return fmt.Errorf("external signing not currently supported with private transactions")
 		}
 		log.Debug("PrivateFrom='", e.PrivateFrom, "' PrivateFor='", e.PrivateFor, "'")
 	}
@@ -196,6 +199,14 @@ func (e *Exerciser) Start() (err error) {
 	}
 
 	log.Debug("Connecting workers. Count=", e.Workers)
+
+	// Connect the client
+	rpcClient, err := rpc.DialHTTPWithClient(e.URL, http.DefaultClient)
+	if err != nil {
+		return fmt.Errorf("connection to %s failed: %s", e.URL, err)
+	}
+	log.Debug("Connected. URL=", e.URL)
+
 	var workers = make([]Worker, e.Workers)
 	for i := 0; i < len(workers); i++ {
 		worker := &workers[i]
@@ -206,7 +217,7 @@ func (e *Exerciser) Start() (err error) {
 		if e.ExternalSign {
 			worker.PrivateKey = keys[i]
 		}
-		if err := worker.Init(); err != nil {
+		if err := worker.Init(rpcClient); err != nil {
 			return err
 		}
 	}
@@ -229,7 +240,7 @@ func (e *Exerciser) Start() (err error) {
 		}
 	} else {
 		if !common.IsHexAddress(e.Contract) {
-			return fmt.Errorf("Invalid contract address: %s", e.Contract)
+			return fmt.Errorf("invalid contract address: %s", e.Contract)
 		}
 		contractAddr := common.HexToAddress(e.Contract)
 		e.To = &contractAddr
