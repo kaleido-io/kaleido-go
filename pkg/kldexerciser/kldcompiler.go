@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"os/exec"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -76,11 +77,41 @@ func GenerateTypedArgs(abi abi.ABI, methodName string, strargs []string) ([]inte
 
 }
 
+type SolcVersion struct {
+	Path    string
+	Version string
+}
+
+var solcVerExtractor = regexp.MustCompile(`\d+\.\d+\.\d+`)
+
+func getSolcVersion(solcPath string) (*SolcVersion, error) {
+
+	cmdOutput := new(bytes.Buffer)
+	cmd := exec.Command(solcPath, "--version")
+	cmd.Stdout = cmdOutput
+
+	err := cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("failed to invoke solc binary '%s' to check version: %s", solcPath, err)
+	}
+
+	ver := solcVerExtractor.FindString(cmdOutput.String())
+	if ver == "" {
+		return nil, fmt.Errorf("failed to extract version from solc '%s' output: %s", solcPath, cmdOutput.String())
+	}
+
+	return &SolcVersion{
+		Path:    solcPath,
+		Version: ver,
+	}, nil
+
+}
+
 // CompileContract uses solc to compile the Solidity source and
 func CompileContract(solidityFile, evmVersion, contractName, method string, args []string) (*CompiledSolidity, error) {
 	var c CompiledSolidity
 
-	solcVer, err := compiler.SolidityVersion("solc")
+	solcVer, err := getSolcVersion("solc")
 	if err != nil {
 		return nil, fmt.Errorf("failed to find solidity version: %s", err)
 	}
