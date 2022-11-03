@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -201,7 +202,24 @@ func (e *Exerciser) Start() (err error) {
 	log.Debug("Connecting workers. Count=", e.Workers)
 
 	// Connect the client
-	rpcClient, err := rpc.DialHTTPWithClient(e.URL, http.DefaultClient)
+	dialer := &net.Dialer{
+		Timeout:   time.Duration(60) * time.Second,
+		KeepAlive: time.Duration(60) * time.Second,
+		DualStack: true,
+	}
+	transport := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
+		MaxIdleConns:          500,
+		MaxIdleConnsPerHost:   500,
+		MaxConnsPerHost:       500,
+		IdleConnTimeout:       time.Duration(100) * time.Second,
+		ExpectContinueTimeout: 0, // Send body immediately on the back-end
+	}
+	httpClient := &http.Client{
+		Transport: transport,
+	}
+	rpcClient, err := rpc.DialHTTPWithClient(e.URL, httpClient)
 	if err != nil {
 		return fmt.Errorf("connection to %s failed: %s", e.URL, err)
 	}
