@@ -15,12 +15,14 @@
 package kldexerciser
 
 import (
+	"bufio"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -207,6 +209,10 @@ func (e *Exerciser) Start() (err error) {
 	}
 	log.Debug("Connected. URL=", e.URL)
 
+	// when using external signing, we want all the workers to first generate
+	// and sign the transactions, then wait for all the workers to be ready
+	// to send the transactions together, in order to maximize the concurrent tx submissions.
+	// we use a channel to send the "submit transaction" signal to the workers
 	var workers = make([]Worker, e.Workers)
 	for i := 0; i < len(workers); i++ {
 		worker := &workers[i]
@@ -216,6 +222,7 @@ func (e *Exerciser) Start() (err error) {
 		worker.Exerciser = e
 		if e.ExternalSign {
 			worker.PrivateKey = keys[i]
+			worker.SubmitTxSignal = make(chan bool)
 		}
 		if err := worker.Init(rpcClient); err != nil {
 			return err
@@ -266,6 +273,15 @@ func (e *Exerciser) Start() (err error) {
 				}
 				wg.Done()
 			}(worker)
+		}
+		if e.ExternalSign {
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Print("Press Enter to continue -> ")
+			reader.ReadString('\n')
+
+			for _, worker := range workers {
+				worker.SubmitTxSignal <- true
+			}
 		}
 		wg.Wait()
 		log.Info("All workers complete. Success=", e.TotalSuccesses, " Failure=", e.TotalFailures)

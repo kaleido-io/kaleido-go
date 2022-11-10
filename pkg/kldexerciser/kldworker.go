@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/avast/retry-go"
@@ -51,6 +50,7 @@ type Worker struct {
 	Account               common.Address
 	PrivateKey            *ecdsa.PrivateKey
 	Signer                types.EIP155Signer
+	SubmitTxSignal        chan bool
 	servername            string
 	pid                   int
 	telegrafMetricsFormat bool
@@ -258,7 +258,7 @@ func (w *Worker) signAndSendTxn(tx *types.Transaction) (string, error) {
 	var buff bytes.Buffer
 	signedTx.EncodeRLP(&buff)
 	from, _ := types.Sender(w.Signer, signedTx)
-	w.debug("TX signed. ChainID=%d From=%s", w.Exerciser.ChainID, from.Hex())
+	w.info("TX signed. ChainID=%d From=%s", w.Exerciser.ChainID, from.Hex())
 	if from.Hex() != w.Account.Hex() {
 		return "", fmt.Errorf("EIP155 signing failed - Account=%s From=%s", w.Account.Hex(), from.Hex())
 	}
@@ -268,6 +268,10 @@ func (w *Worker) signAndSendTxn(tx *types.Transaction) (string, error) {
 	if err != nil {
 		return txHash, fmt.Errorf("failed to RLP encode: %s", err)
 	}
+	if w.Exerciser.ExternalSign {
+		<-w.SubmitTxSignal
+	}
+	w.info("Sending TX From=%s", from.Hex())
 	err = w.rpcCall(&txHash, "eth_sendRawTransaction", "0x"+hex.EncodeToString(data))
 	return txHash, err
 }
@@ -460,58 +464,58 @@ func (w *Worker) Run() {
 		// Find the difference between the last successful mining time, and the initial wait
 		// period. Aim for two retries per round, by roughly spliting the difference between
 		// the minimum time, and 1 second over the last mining time.
-		minSleep := time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second
-		if w.lastMiningTime < minSleep {
-			w.lastMiningTime = minSleep
-		}
-		retryDelay := (w.lastMiningTime - minSleep + 1*time.Second) / 2
-		if retryDelay < 1*time.Second {
-			retryDelay = 1 * time.Second
-		}
-		// Reset the lastMiningTime each time round the loop
-		w.lastMiningTime = 0
+		// minSleep := time.Duration(w.Exerciser.ReceiptWaitMin) * time.Second
+		// if w.lastMiningTime < minSleep {
+		// 	w.lastMiningTime = minSleep
+		// }
+		// retryDelay := (w.lastMiningTime - minSleep + 1*time.Second) / 2
+		// if retryDelay < 1*time.Second {
+		// 	retryDelay = 1 * time.Second
+		// }
+		// // Reset the lastMiningTime each time round the loop
+		// w.lastMiningTime = 0
 
-		// Transactions will not be mined immediately.
-		// Wait for number of configurable number of seconds before attempting
-		// to check for the transaction receipt.
-		// ** This should be greater than the block period **
-		initialSleep := minSleep + retryDelay
-		w.debug("Waiting for %.2fs seconds then retrying every %.2fs", initialSleep.Seconds(), retryDelay.Seconds())
-		start := time.Now()
-		time.Sleep(minSleep)
+		// // Transactions will not be mined immediately.
+		// // Wait for number of configurable number of seconds before attempting
+		// // to check for the transaction receipt.
+		// // ** This should be greater than the block period **
+		// initialSleep := minSleep + retryDelay
+		// w.debug("Waiting for %.2fs seconds then retrying every %.2fs", initialSleep.Seconds(), retryDelay.Seconds())
+		// start := time.Now()
+		// time.Sleep(minSleep)
 
 		// Wait for the receipts of all successfully set transctions
-		var loopSuccesses uint64
-		for _, txHash := range txHashes {
-			receipt, err := w.waitUntilMined(start, txHash, retryDelay)
-			if err != nil {
-				w.error("TX:%s failed checking receipt: %s", txHash, err)
-			} else {
-				// Store the mining time for the first successful transaction
-				if w.lastMiningTime == 0 {
-					w.lastMiningTime = time.Since(start)
-					w.emitTiming("tx.minetime", w.lastMiningTime)
-					w.debug("First TX for this loop iteration mined after %.2fs", w.lastMiningTime.Seconds())
-				}
+		// var loopSuccesses uint64
+		// for _, txHash := range txHashes {
+		// 	receipt, err := w.waitUntilMined(start, txHash, retryDelay)
+		// 	if err != nil {
+		// 		w.error("TX:%s failed checking receipt: %s", txHash, err)
+		// 	} else {
+		// 		// Store the mining time for the first successful transaction
+		// 		if w.lastMiningTime == 0 {
+		// 			w.lastMiningTime = time.Since(start)
+		// 			w.emitTiming("tx.minetime", w.lastMiningTime)
+		// 			w.debug("First TX for this loop iteration mined after %.2fs", w.lastMiningTime.Seconds())
+		// 		}
 
-				if receipt.Status.ToInt().Uint64() == 0 {
-					w.error("TX:%s failed. Status=%s", txHash, receipt.Status.ToInt())
-					// If gasUsed == gasProvided, then you ran out of gas
-					if receipt.GasUsed.ToInt().Uint64() == uint64(w.Exerciser.Gas) {
-						w.error("TX ran out of gas before completion.")
-					}
-				} else {
-					loopSuccesses++
-				}
-			}
-		}
-		var loopFailures = uint64(w.Exerciser.TxnsPerLoop) - loopSuccesses
+		// 		if receipt.Status.ToInt().Uint64() == 0 {
+		// 			w.error("TX:%s failed. Status=%s", txHash, receipt.Status.ToInt())
+		// 			// If gasUsed == gasProvided, then you ran out of gas
+		// 			if receipt.GasUsed.ToInt().Uint64() == uint64(w.Exerciser.Gas) {
+		// 				w.error("TX ran out of gas before completion.")
+		// 			}
+		// 		} else {
+		// 			loopSuccesses++
+		// 		}
+		// 	}
+		// }
+		// var loopFailures = uint64(w.Exerciser.TxnsPerLoop) - loopSuccesses
 
-		// Increment global counters
-		successes += loopSuccesses
-		atomic.AddUint64(&w.Exerciser.TotalSuccesses, loopSuccesses)
-		failures += loopFailures
-		atomic.AddUint64(&w.Exerciser.TotalFailures, loopFailures)
+		// // Increment global counters
+		// successes += loopSuccesses
+		// atomic.AddUint64(&w.Exerciser.TotalSuccesses, loopSuccesses)
+		// failures += loopFailures
+		// atomic.AddUint64(&w.Exerciser.TotalFailures, loopFailures)
 	}
 
 	w.RPC.Close()
