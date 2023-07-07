@@ -1,5 +1,11 @@
  # Go parameters
 GOCMD=go
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell go env GOBIN))
+GOBIN=$(shell go env GOPATH)/bin
+else
+GOBIN=$(shell go env GOBIN)
+endif
 GOBUILD=$(GOCMD) build
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
@@ -9,7 +15,14 @@ BINARY_UNIX=$(BINARY_NAME)-tux
 BINARY_MAC=$(BINARY_NAME)-mac
 BINARY_WIN=$(BINARY_NAME)-win
 
-all: deps build
+all: deps govulncheck build
+# govulncheck
+GOVULNCHECK := $(GOBIN)/govulncheck
+.PHONY: govulncheck
+govulncheck: ${GOVULNCHECK}
+	./govulnchecktool.sh
+${GOVULNCHECK}:
+	${GOCMD} install golang.org/x/vuln/cmd/govulncheck@latest
 build: 
 		$(GOBUILD) -o $(BINARY_NAME) -v
 clean: 
