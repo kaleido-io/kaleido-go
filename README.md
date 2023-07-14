@@ -28,6 +28,10 @@ This code is distributed under the [Apache 2 license](LICENSE).
 > Please note the code currently statically links to code distributed under the
 > LGPL license.
 
+## Runtime Dependencies
+
+- [Solidity compiler](https://docs.soliditylang.org/en/v0.8.17/installing-solidity.html)
+
 ## Running
 
 ```
